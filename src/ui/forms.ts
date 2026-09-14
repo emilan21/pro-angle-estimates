@@ -11,6 +11,23 @@ export function catalogFormPayload(values: Record<string, string>): CatalogInput
   };
 }
 
+export function catalogWithOfferFormPayload(values: Record<string, string>) {
+  const catalog = catalogFormPayload(values);
+  const hasRetailerOffer = ["retailer", "sku", "modelOrUpc", "productUrl", "storeContext", "observedPrice"].some((field) => values[field]?.trim());
+  return {
+    ...catalog,
+    retailerOffer: hasRetailerOffer ? {
+      retailer: values.retailer?.trim() ?? "",
+      sku: values.sku?.trim() || null,
+      modelOrUpc: values.modelOrUpc?.trim() || null,
+      productUrl: values.productUrl?.trim() || null,
+      storeContext: values.storeContext?.trim() || null,
+      observedPriceCents: Math.round(Number(values.observedPrice) * 100),
+      observedAt: values.observedAt ? new Date(values.observedAt).toISOString() : new Date().toISOString(),
+    } : null,
+  };
+}
+
 export function retailerOfferFormPayload(values: Record<string, string>, catalogItemId: string) {
   const observedAt = values.observedAt ? new Date(values.observedAt).toISOString() : new Date().toISOString();
   return {

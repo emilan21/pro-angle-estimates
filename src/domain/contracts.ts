@@ -40,6 +40,10 @@ export const retailerOfferInput = z.object({
   observedAt: z.iso.datetime()
 }).strict();
 
+export const catalogWithOfferInput = catalogInput.extend({
+  retailerOffer: retailerOfferInput.omit({ catalogItemId: true }).nullable().optional()
+}).strict();
+
 export const lineItemInput = z.object({
   catalogItemId: z.uuid().nullish(),
   position: z.number().int().min(0),

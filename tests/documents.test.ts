@@ -11,6 +11,6 @@ describe("documents",()=>{
   it("quotes RFC 4180 fields",()=>expect(csvCell('a,"b"\n')).toBe('"a,""b""\n"'));
   it("exports one CSV row per line",()=>{const csv=estimateCsv(fixture);expect(csv).toContain('"Doe, Jane"');expect(csv.split("\r\n")).toHaveLength(3)});
   it("creates two valid XLSX worksheet entries",()=>{const zip=unzipSync(estimateXlsx(fixture));expect(Object.keys(zip)).toContain("xl/worksheets/sheet2.xml");expect(strFromU8(zip["xl/workbook.xml"])).toContain("Estimate Summary")});
-  it("keeps totals with the final item block and correct brand",()=>{const html=estimateHtml(fixture);expect(html).toContain("PRO <span>ANGLE</span>");expect(html).toContain("CONSTRUCTION");expect(html).not.toContain("CONTRACTING");expect(html).toContain("break-inside:avoid")});
+  it("keeps totals with the final item block and complete branded artwork",()=>{const html=estimateHtml(fixture);expect(html).toContain('src="data:image/jpeg;base64,');expect(html).toContain('<span class="brand-fix">CONSTRUCTION</span>');expect(html).not.toContain(">CONTRACTING<");expect(html).toContain("188 Kaider Road");expect(html).toContain("440.429.3474");expect(html).toContain("break-inside:avoid")});
   it("exports manifest and relational tables",()=>{const zip=unzipSync(fullExportZip([{name:"customers",rows:[{id:"1"}]}],"2026-09-13T00:00:00Z"));expect(JSON.parse(strFromU8(zip["manifest.json"])).tables[0].records).toBe(1);expect(strFromU8(zip["customers.csv"])).toContain("id")});
 });
