@@ -49,6 +49,22 @@ export const counters = sqliteTable("counters", {
   scope: text("scope").primaryKey(), nextValue: integer("next_value").notNull(), updatedAt: text("updated_at").notNull()
 });
 
+export const jobMaterials = sqliteTable("job_materials", {
+  id: text("id").primaryKey(), jobId: text("job_id").notNull().references(() => jobs.id), catalogItemId: text("catalog_item_id").references(() => catalogItems.id), position: integer("position").notNull(), description: text("description").notNull(), quantity: real("quantity").notNull(), unit: text("unit").notNull(), unitCostCents: integer("unit_cost_cents"), retailer: text("retailer"), skuOrModel: text("sku_or_model"), productUrl: text("product_url"), notes: text("notes"), ...timestamps
+}, (table) => [uniqueIndex("job_material_position_uq").on(table.jobId, table.position), index("job_material_job_idx").on(table.jobId)]);
+
+export const estimateDrafts = sqliteTable("estimate_drafts", {
+  id: text("id").primaryKey(), jobId: text("job_id").notNull().references(() => jobs.id), notes: text("notes"), sourceEstimateId: text("source_estimate_id").references(() => estimates.id), ...timestamps
+}, (table) => [uniqueIndex("estimate_draft_job_uq").on(table.jobId)]);
+
+export const draftCharges = sqliteTable("estimate_draft_charges", {
+  id: text("id").primaryKey(), draftId: text("draft_id").notNull().references(() => estimateDrafts.id), position: integer("position").notNull(), description: text("description").notNull(), details: text("details"), amountCents: integer("amount_cents").notNull(), ...timestamps
+}, (table) => [uniqueIndex("draft_charge_position_uq").on(table.draftId, table.position), index("draft_charge_draft_idx").on(table.draftId)]);
+
+export const draftAdjustments = sqliteTable("estimate_draft_adjustments", {
+  draftId: text("draft_id").notNull().references(() => estimateDrafts.id), kind: text("kind").notNull(), mode: text("mode").notNull(), value: integer("value").notNull()
+}, (table) => [primaryKey({ columns: [table.draftId, table.kind] })]);
+
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(), valueJson: text("value_json").notNull(), updatedAt: text("updated_at").notNull(), updatedBy: text("updated_by").notNull()
 });
