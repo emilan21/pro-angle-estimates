@@ -9,6 +9,12 @@ resource "github_repository" "app" {
   allow_squash_merge     = true
 }
 
+# The repository is bootstrapped once by `gh repo create`; first apply adopts it.
+import {
+  to = github_repository.app
+  id = "pro-angle-estimates"
+}
+
 resource "github_repository_vulnerability_alerts" "app" {
   repository = github_repository.app.name
   enabled    = true
