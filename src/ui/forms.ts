@@ -25,6 +25,18 @@ export function retailerOfferFormPayload(values: Record<string, string>, catalog
   };
 }
 
+export function jobLineFormPayload(values: Record<string, string>, source: { catalogItemId: string | null; position: number }) {
+  return {
+    ...source,
+    description: values.description ?? "",
+    details: values.details?.trim() || null,
+    skuOrModel: values.skuOrModel?.trim() || null,
+    unit: values.unit ?? "",
+    quantity: Number(values.quantity),
+    unitPriceCents: Math.round(Number(values.unitPrice) * 100),
+  };
+}
+
 export function dateTimeLocalValue(value = new Date().toISOString()): string {
   const date = new Date(value);
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
