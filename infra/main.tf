@@ -47,14 +47,6 @@ resource "github_repository_ruleset" "main" {
   }
 }
 
-resource "cloudflare_worker" "app" {
-  for_each      = local.environments
-  account_id    = var.cloudflare_account_id
-  name          = each.key == "production" ? "pro-angle-estimates" : "pro-angle-estimates-staging"
-  subdomain     = { enabled = false, previews_enabled = false }
-  observability = { enabled = true, head_sampling_rate = 1, logs = { enabled = true, head_sampling_rate = 1, invocation_logs = true, persist = true }, traces = { enabled = true, head_sampling_rate = 0.1, persist = true } }
-}
-
 resource "cloudflare_d1_database" "app" {
   for_each              = local.environments
   account_id            = var.cloudflare_account_id
@@ -91,10 +83,17 @@ resource "cloudflare_zero_trust_access_policy" "company_email" {
   name             = "Allow Pro Angle company Gmail"
   decision         = "allow"
   session_duration = "12h"
-  include          = [{ email = { email = var.allowed_email } }, { service_token = { token_id = cloudflare_zero_trust_access_service_token.smoke.id } }]
+  include          = [{ email = { email = var.allowed_email } }]
   lifecycle {
     create_before_destroy = true
   }
+}
+
+resource "cloudflare_zero_trust_access_policy" "smoke_service" {
+  account_id = var.cloudflare_account_id
+  name       = "Authenticate Pro Angle CI smoke checks"
+  decision   = "non_identity"
+  include    = [{ service_token = { token_id = cloudflare_zero_trust_access_service_token.smoke.id } }]
 }
 
 resource "cloudflare_zero_trust_access_application" "app" {
@@ -104,9 +103,10 @@ resource "cloudflare_zero_trust_access_application" "app" {
   type                      = "self_hosted"
   domain                    = each.key == "production" ? "estimates.proangleconstructionpa.com" : "estimates-staging.proangleconstructionpa.com"
   session_duration          = "12h"
-  auto_redirect_to_identity = false
+  auto_redirect_to_identity = true
+  allowed_idps              = [var.google_identity_provider_id]
   app_launcher_visible      = false
-  policies                  = [{ id = cloudflare_zero_trust_access_policy.company_email.id, precedence = 1 }]
+  policies                  = [{ id = cloudflare_zero_trust_access_policy.smoke_service.id, precedence = 1 }, { id = cloudflare_zero_trust_access_policy.company_email.id, precedence = 2 }]
 }
 
 resource "cloudflare_workers_custom_domain" "app" {
@@ -115,5 +115,5 @@ resource "cloudflare_workers_custom_domain" "app" {
   zone_id    = var.cloudflare_zone_id
   zone_name  = "proangleconstructionpa.com"
   hostname   = each.key == "production" ? "estimates.proangleconstructionpa.com" : "estimates-staging.proangleconstructionpa.com"
-  service    = cloudflare_worker.app[each.key].name
+  service    = each.key == "production" ? "pro-angle-estimates" : "pro-angle-estimates-staging"
 }
