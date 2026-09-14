@@ -16,6 +16,7 @@ import { apiError, auditStatement, now, sha256Hex } from "./helpers";
 type AppBindings = { Bindings: Env; Variables: { actorEmail: string } };
 export const api = new Hono<AppBindings>();
 const idParam = z.object({ id: z.uuid() });
+const jobLineParam = z.object({ jobId: z.uuid(), id: z.uuid() });
 
 api.get("/health", (c) => c.json({ ok: true, version: "v1" }));
 
@@ -61,8 +62,15 @@ api.post("/jobs/:id/line-items", zValidator("param", idParam), zValidator("json"
   catch { return apiError(c, 409, "LINE_ITEM_CONFLICT", "The job or line position is invalid."); }
   return c.json({ data: await drizzle(c.env.DB).select().from(jobLineItems).where(eq(jobLineItems.id, id)).get() }, 201);
 });
-api.delete("/jobs/:jobId/line-items/:id", async (c) => {
-  const id = c.req.param("id"), jobId = c.req.param("jobId"), actor = c.get("actorEmail");
+api.patch("/jobs/:jobId/line-items/:id", zValidator("param", jobLineParam), zValidator("json", lineItemInput), async (c) => {
+  const { id, jobId } = c.req.valid("param"), input = c.req.valid("json"), actor = c.get("actorEmail"), timestamp = now();
+  const updated = await drizzle(c.env.DB).update(jobLineItems).set({ catalogItemId: input.catalogItemId ?? null, position: input.position, description: input.description, details: input.details ?? null, skuOrModel: input.skuOrModel ?? null, unit: input.unit, quantity: input.quantity, unitPriceCents: input.unitPriceCents, updatedAt: timestamp }).where(and(eq(jobLineItems.id, id), eq(jobLineItems.jobId, jobId))).returning().get();
+  if (!updated) return apiError(c, 404, "NOT_FOUND", "Line item not found.");
+  await auditStatement(c.env.DB, actor, "update", "job_line_item", id, { jobId }).run();
+  return c.json({ data: updated });
+});
+api.delete("/jobs/:jobId/line-items/:id", zValidator("param", jobLineParam), async (c) => {
+  const { id, jobId } = c.req.valid("param"), actor = c.get("actorEmail");
   const result = await drizzle(c.env.DB).delete(jobLineItems).where(and(eq(jobLineItems.id, id), eq(jobLineItems.jobId, jobId))).returning().get();
   if (!result) return apiError(c, 404, "NOT_FOUND", "Line item not found.");
   await auditStatement(c.env.DB, actor, "delete", "job_line_item", id, { jobId }).run(); return c.body(null, 204);
@@ -99,7 +107,15 @@ api.patch("/retailer-offers/:id", zValidator("param", idParam), zValidator("json
   return c.json({ data: updated });
 });
 
-api.get("/estimates", async (c) => c.json({ data: await drizzle(c.env.DB).select().from(estimates).orderBy(desc(estimates.generatedAt)).all() }));
+api.get("/estimates", async (c) => {
+  const [estimateRows, artifactRows] = await Promise.all([
+    drizzle(c.env.DB).select().from(estimates).orderBy(desc(estimates.generatedAt)).all(),
+    drizzle(c.env.DB).select({ id: artifacts.id, estimateId: artifacts.estimateId, format: artifacts.format, filename: artifacts.filename, status: artifacts.status }).from(artifacts).all()
+  ]);
+  const artifactsByEstimate = new Map<string, typeof artifactRows>();
+  for (const artifact of artifactRows) artifactsByEstimate.set(artifact.estimateId, [...(artifactsByEstimate.get(artifact.estimateId) ?? []), artifact]);
+  return c.json({ data: estimateRows.map((estimate) => ({ ...estimate, artifacts: artifactsByEstimate.get(estimate.id) ?? [] })) });
+});
 api.post("/jobs/:id/estimates", zValidator("param", idParam), zValidator("json", estimateGenerationInput), async (c) => {
   const jobId = c.req.valid("param").id, input = c.req.valid("json"), actor = c.get("actorEmail"), timestamp = now(), estimateId = crypto.randomUUID();
   const jobResult = await c.env.DB.prepare("SELECT j.*, c.display_id AS customer_display_id, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone, c.address AS customer_address FROM jobs j JOIN customers c ON c.id = j.customer_id WHERE j.id = ?").bind(jobId).first<Record<string, string | null>>();
