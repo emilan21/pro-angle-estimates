@@ -1,0 +1,26 @@
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE customers (id TEXT PRIMARY KEY, display_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL, email TEXT, phone TEXT, address TEXT, notes TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX customers_name_idx ON customers(name);
+CREATE TABLE jobs (id TEXT PRIMARY KEY, display_id TEXT NOT NULL UNIQUE, customer_id TEXT NOT NULL REFERENCES customers(id), name TEXT NOT NULL, address TEXT, scope TEXT, notes TEXT, status TEXT NOT NULL DEFAULT 'draft', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX jobs_customer_idx ON jobs(customer_id); CREATE INDEX jobs_status_idx ON jobs(status);
+CREATE TABLE catalog_items (id TEXT PRIMARY KEY, description TEXT NOT NULL, unit TEXT NOT NULL, default_price_cents INTEGER NOT NULL CHECK(default_price_cents >= 0), active INTEGER NOT NULL DEFAULT 1, notes TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX catalog_description_idx ON catalog_items(description);
+CREATE TABLE retailer_offers (id TEXT PRIMARY KEY, catalog_item_id TEXT NOT NULL REFERENCES catalog_items(id), retailer TEXT NOT NULL, sku TEXT, model_or_upc TEXT, product_url TEXT, store_context TEXT, observed_price_cents INTEGER NOT NULL CHECK(observed_price_cents >= 0), observed_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE UNIQUE INDEX retailer_offer_identity_uq ON retailer_offers(catalog_item_id, retailer, sku, store_context); CREATE INDEX retailer_offer_catalog_idx ON retailer_offers(catalog_item_id);
+CREATE TABLE price_history (id TEXT PRIMARY KEY, retailer_offer_id TEXT NOT NULL REFERENCES retailer_offers(id), price_cents INTEGER NOT NULL CHECK(price_cents >= 0), observed_at TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'manual', created_at TEXT NOT NULL);
+CREATE INDEX price_history_offer_idx ON price_history(retailer_offer_id, observed_at);
+CREATE TABLE job_line_items (id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), catalog_item_id TEXT REFERENCES catalog_items(id), position INTEGER NOT NULL, description TEXT NOT NULL, details TEXT, sku_or_model TEXT, unit TEXT NOT NULL, quantity REAL NOT NULL CHECK(quantity > 0), unit_price_cents INTEGER NOT NULL CHECK(unit_price_cents >= 0), created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE UNIQUE INDEX job_line_position_uq ON job_line_items(job_id, position); CREATE INDEX job_line_job_idx ON job_line_items(job_id);
+CREATE TABLE estimates (id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), display_id TEXT NOT NULL UNIQUE, version INTEGER NOT NULL CHECK(version > 0), customer_snapshot_json TEXT NOT NULL, job_snapshot_json TEXT NOT NULL, notes TEXT, subtotal_cents INTEGER NOT NULL, total_cents INTEGER NOT NULL, deposit_cents INTEGER NOT NULL, balance_due_cents INTEGER NOT NULL, generated_at TEXT NOT NULL, generated_by TEXT NOT NULL);
+CREATE UNIQUE INDEX estimate_job_version_uq ON estimates(job_id, version); CREATE INDEX estimate_job_idx ON estimates(job_id);
+CREATE TABLE estimate_line_items (id TEXT PRIMARY KEY, estimate_id TEXT NOT NULL REFERENCES estimates(id), source_line_item_id TEXT, position INTEGER NOT NULL, description TEXT NOT NULL, details TEXT, sku_or_model TEXT, unit TEXT NOT NULL, quantity REAL NOT NULL, unit_price_cents INTEGER NOT NULL, amount_cents INTEGER NOT NULL);
+CREATE UNIQUE INDEX estimate_line_position_uq ON estimate_line_items(estimate_id, position);
+CREATE TABLE estimate_adjustments (estimate_id TEXT NOT NULL REFERENCES estimates(id), kind TEXT NOT NULL CHECK(kind IN ('markup','discount','tax','deposit')), mode TEXT NOT NULL CHECK(mode IN ('percent','fixed')), value INTEGER NOT NULL CHECK(value >= 0), amount_cents INTEGER NOT NULL, PRIMARY KEY(estimate_id, kind));
+CREATE TABLE artifacts (id TEXT PRIMARY KEY, estimate_id TEXT NOT NULL REFERENCES estimates(id), format TEXT NOT NULL CHECK(format IN ('pdf','xlsx','csv')), object_key TEXT NOT NULL UNIQUE, filename TEXT NOT NULL, content_type TEXT NOT NULL, size_bytes INTEGER, checksum_sha256 TEXT, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','ready','failed')), failure_reason TEXT, created_at TEXT NOT NULL);
+CREATE UNIQUE INDEX artifact_estimate_format_uq ON artifacts(estimate_id, format);
+CREATE TABLE counters (scope TEXT PRIMARY KEY, next_value INTEGER NOT NULL CHECK(next_value > 0), updated_at TEXT NOT NULL);
+CREATE TABLE settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT NOT NULL);
+CREATE TABLE audit_events (id TEXT PRIMARY KEY, actor_email TEXT NOT NULL, action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, metadata_json TEXT, created_at TEXT NOT NULL);
+CREATE INDEX audit_entity_idx ON audit_events(entity_type, entity_id); CREATE INDEX audit_created_idx ON audit_events(created_at);
+INSERT INTO counters(scope, next_value, updated_at) VALUES ('customer', 1, datetime('now'));

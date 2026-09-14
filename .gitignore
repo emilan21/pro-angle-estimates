@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.wrangler/
+infra/.terraform/
+infra/*.tfstate*
+.dev.vars
+.env*
+!.env.example
+coverage/
+*.log
+*.sqlite*
+output/
+tmp/
+.DS_Store

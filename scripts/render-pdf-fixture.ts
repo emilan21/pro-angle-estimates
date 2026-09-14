@@ -1,0 +1,8 @@
+import { writeFile } from "node:fs/promises";
+import type { EstimateSnapshot } from "../src/domain/contracts";
+import { estimateHtml } from "../src/documents/pdf";
+
+const lines = Array.from({ length: 18 }, (_, position) => ({ id: crypto.randomUUID(), catalogItemId: null, position, description: position === 3 ? "Premium pressure-treated decking board with a deliberately long description to verify wrapping and page flow" : `Construction material ${position + 1}`, details: position % 4 === 0 ? "Observed and confirmed for this estimate snapshot." : null, skuOrModel: position % 3 === 0 ? `PAC-${1000 + position}` : null, unit: position % 2 ? "each" : "linear ft", quantity: position + 1, unitPriceCents: 856 + position * 137, amountCents: Math.round((position + 1) * (856 + position * 137)) }));
+const subtotalCents = lines.reduce((sum, line) => sum + line.amountCents, 0);
+const fixture: EstimateSnapshot = { estimateId: crypto.randomUUID(), displayId: "EST-J-2026-0001-v01", version: 1, generatedAt: "2026-09-13T16:00:00.000Z", customer: { displayId: "C-0001", name: "Sample Customer", email: "customer@example.com", phone: "555-555-5555", address: "111 Example Road\nUniontown, PA 15401" }, job: { displayId: "J-2026-0001", name: "Deck Replacement", address: "111 Example Road", scope: "Rebuild the damaged deck with pressure-treated framing, decking, railing, and finish work." }, lines, adjustments: [], totals: { subtotalCents, markupCents: 0, discountCents: 0, taxCents: 0, totalCents: subtotalCents, depositCents: 0, balanceDueCents: subtotalCents }, notes: "Pricing is valid for 30 days." };
+await writeFile("tmp/pdfs/estimate-fixture.html", estimateHtml(fixture), "utf8");

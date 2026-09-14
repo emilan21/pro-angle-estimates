@@ -1,0 +1,22 @@
+import { Hono } from "hono";
+import { secureHeaders } from "hono/secure-headers";
+import { api } from "./api/routes";
+import { verifyAccessJwt } from "./api/auth";
+
+type AppBindings = { Bindings: Env; Variables: { actorEmail: string } };
+const app = new Hono<AppBindings>();
+app.use("*", secureHeaders({ contentSecurityPolicy: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:"], scriptSrc: ["'self'"], connectSrc: ["'self'"] }, strictTransportSecurity: "max-age=31536000; includeSubDomains", referrerPolicy: "no-referrer" }));
+app.use("*", async (c, next) => {
+  const requestId = c.req.header("cf-ray") ?? crypto.randomUUID();
+  try {
+    if (String(c.env.LOCAL_DEV_BYPASS) === "true" && new URL(c.req.url).hostname === "localhost") c.set("actorEmail", c.env.ALLOWED_EMAIL);
+    else { const token = c.req.header("cf-access-jwt-assertion"); if (!token) return c.json({ error: { code: "AUTH_REQUIRED", message: "Cloudflare Access authentication is required." } }, 401); const identity = await verifyAccessJwt(token, c.env.ACCESS_TEAM_DOMAIN, c.env.ACCESS_AUD, c.env.ALLOWED_EMAIL, c.env.SMOKE_ACCESS_CLIENT_ID); c.set("actorEmail", identity.email); }
+    await next();
+    console.log(JSON.stringify({ message: "request", requestId, method: c.req.method, path: c.req.path, status: c.res.status, actor: c.get("actorEmail") }));
+  } catch (error) { console.error(JSON.stringify({ message: "request failed", requestId, method: c.req.method, path: c.req.path, error: error instanceof Error ? error.message : "unknown" })); return c.json({ error: { code: "FORBIDDEN", message: "Access denied." } }, 403); }
+});
+app.route("/api/v1", api);
+app.notFound(async (c) => c.env.ASSETS.fetch(c.req.raw));
+
+export default { fetch: app.fetch } satisfies ExportedHandler<Env>;
+export { BackupWorkflow } from "./workflows/backup";
