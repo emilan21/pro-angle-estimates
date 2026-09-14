@@ -6,7 +6,7 @@ import { z } from "zod";
 import { calculateEstimate, lineAmountCents } from "../domain/calculations";
 import { catalogInput, customerInput, estimateGenerationInput, jobInput, lineItemInput, retailerOfferInput, type AdjustmentInput, type EstimateSnapshot } from "../domain/contracts";
 import { safeArtifactFilename } from "../domain/ids";
-import { artifacts, catalogItems, customers, estimates, jobLineItems, jobs, retailerOffers } from "../db/schema";
+import { artifacts, catalogItems, customers, estimates, jobLineItems, jobs, priceHistory, retailerOffers } from "../db/schema";
 import { fullExportZip } from "../documents/backup";
 import { estimateCsv } from "../documents/csv";
 import { estimateHtml } from "../documents/pdf";
@@ -32,6 +32,13 @@ api.post("/customers", zValidator("json", customerInput), async (c) => {
   const insert = c.env.DB.prepare("INSERT INTO customers(id, display_id, name, email, phone, address, notes, created_at, updated_at) SELECT ?, printf('C-%04d', next_value), ?, ?, ?, ?, ?, ?, ? FROM counters WHERE scope = 'customer'").bind(id, input.name, input.email || null, input.phone || null, input.address || null, input.notes || null, timestamp, timestamp);
   await c.env.DB.batch([insert, c.env.DB.prepare("UPDATE counters SET next_value = next_value + 1, updated_at = ? WHERE scope = 'customer'").bind(timestamp), auditStatement(c.env.DB, actor, "create", "customer", id)]);
   return c.json({ data: await drizzle(c.env.DB).select().from(customers).where(eq(customers.id, id)).get() }, 201);
+});
+api.patch("/customers/:id", zValidator("param", idParam), zValidator("json", customerInput), async (c) => {
+  const id = c.req.valid("param").id, input = c.req.valid("json"), actor = c.get("actorEmail"), timestamp = now();
+  const updated = await drizzle(c.env.DB).update(customers).set({ name: input.name, email: input.email || null, phone: input.phone || null, address: input.address || null, notes: input.notes || null, updatedAt: timestamp }).where(eq(customers.id, id)).returning().get();
+  if (!updated) return apiError(c, 404, "NOT_FOUND", "Customer not found.");
+  await auditStatement(c.env.DB, actor, "update", "customer", id).run();
+  return c.json({ data: updated });
 });
 
 api.get("/jobs", async (c) => {
@@ -67,11 +74,29 @@ api.post("/catalog", zValidator("json", catalogInput), async (c) => {
   await drizzle(c.env.DB).insert(catalogItems).values({ id, ...input, notes: input.notes ?? null, createdAt: timestamp, updatedAt: timestamp }).run(); await auditStatement(c.env.DB, actor, "create", "catalog_item", id).run();
   return c.json({ data: await drizzle(c.env.DB).select().from(catalogItems).where(eq(catalogItems.id, id)).get() }, 201);
 });
+api.patch("/catalog/:id", zValidator("param", idParam), zValidator("json", catalogInput), async (c) => {
+  const id = c.req.valid("param").id, input = c.req.valid("json"), actor = c.get("actorEmail"), timestamp = now();
+  const updated = await drizzle(c.env.DB).update(catalogItems).set({ ...input, notes: input.notes || null, updatedAt: timestamp }).where(eq(catalogItems.id, id)).returning().get();
+  if (!updated) return apiError(c, 404, "NOT_FOUND", "Catalog item not found.");
+  await auditStatement(c.env.DB, actor, "update", "catalog_item", id).run();
+  return c.json({ data: updated });
+});
+api.get("/catalog/:id/retailer-offers", zValidator("param", idParam), async (c) => c.json({ data: await drizzle(c.env.DB).select().from(retailerOffers).where(eq(retailerOffers.catalogItemId, c.req.valid("param").id)).orderBy(desc(retailerOffers.observedAt)).all() }));
 api.post("/retailer-offers", zValidator("json", retailerOfferInput), async (c) => {
   const input = c.req.valid("json"), id = crypto.randomUUID(), historyId = crypto.randomUUID(), timestamp = now(), actor = c.get("actorEmail");
   try { await c.env.DB.batch([c.env.DB.prepare("INSERT INTO retailer_offers(id, catalog_item_id, retailer, sku, model_or_upc, product_url, store_context, observed_price_cents, observed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, input.catalogItemId, input.retailer, input.sku ?? null, input.modelOrUpc ?? null, input.productUrl || null, input.storeContext ?? null, input.observedPriceCents, input.observedAt, timestamp, timestamp), c.env.DB.prepare("INSERT INTO price_history(id, retailer_offer_id, price_cents, observed_at, source, created_at) VALUES (?, ?, ?, ?, 'manual', ?)").bind(historyId, id, input.observedPriceCents, input.observedAt, timestamp), auditStatement(c.env.DB, actor, "create", "retailer_offer", id)]); }
   catch { return apiError(c, 409, "OFFER_CONFLICT", "That retailer offer already exists."); }
   return c.json({ data: await drizzle(c.env.DB).select().from(retailerOffers).where(eq(retailerOffers.id, id)).get() }, 201);
+});
+api.patch("/retailer-offers/:id", zValidator("param", idParam), zValidator("json", retailerOfferInput), async (c) => {
+  const id = c.req.valid("param").id, input = c.req.valid("json"), actor = c.get("actorEmail"), timestamp = now();
+  const current = await drizzle(c.env.DB).select().from(retailerOffers).where(eq(retailerOffers.id, id)).get();
+  if (!current) return apiError(c, 404, "NOT_FOUND", "Retailer offer not found.");
+  if (current.catalogItemId !== input.catalogItemId) return apiError(c, 422, "CATALOG_MISMATCH", "A retailer offer cannot be moved to another catalog item.");
+  const updated = await drizzle(c.env.DB).update(retailerOffers).set({ retailer: input.retailer, sku: input.sku || null, modelOrUpc: input.modelOrUpc || null, productUrl: input.productUrl || null, storeContext: input.storeContext || null, observedPriceCents: input.observedPriceCents, observedAt: input.observedAt, updatedAt: timestamp }).where(eq(retailerOffers.id, id)).returning().get();
+  if (current.observedPriceCents !== input.observedPriceCents || current.observedAt !== input.observedAt) await drizzle(c.env.DB).insert(priceHistory).values({ id: crypto.randomUUID(), retailerOfferId: id, priceCents: input.observedPriceCents, observedAt: input.observedAt, source: "manual", createdAt: timestamp }).run();
+  await auditStatement(c.env.DB, actor, "update", "retailer_offer", id, { catalogItemId: input.catalogItemId }).run();
+  return c.json({ data: updated });
 });
 
 api.get("/estimates", async (c) => c.json({ data: await drizzle(c.env.DB).select().from(estimates).orderBy(desc(estimates.generatedAt)).all() }));
