@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 import { calculateEstimate, lineAmountCents } from "../domain/calculations";
-import { catalogInput, customerInput, estimateGenerationInput, jobInput, lineItemInput, retailerOfferInput, type AdjustmentInput, type EstimateSnapshot } from "../domain/contracts";
+import { catalogInput, catalogWithOfferInput, customerInput, estimateGenerationInput, jobInput, lineItemInput, retailerOfferInput, type AdjustmentInput, type EstimateSnapshot } from "../domain/contracts";
 import { safeArtifactFilename } from "../domain/ids";
 import { artifacts, catalogItems, customers, estimates, jobLineItems, jobs, priceHistory, retailerOffers } from "../db/schema";
 import { fullExportZip } from "../documents/backup";
@@ -77,9 +77,21 @@ api.delete("/jobs/:jobId/line-items/:id", zValidator("param", jobLineParam), asy
 });
 
 api.get("/catalog", async (c) => c.json({ data: await drizzle(c.env.DB).select().from(catalogItems).orderBy(desc(catalogItems.createdAt)).all() }));
-api.post("/catalog", zValidator("json", catalogInput), async (c) => {
-  const input = c.req.valid("json"), id = crypto.randomUUID(), timestamp = now(), actor = c.get("actorEmail");
-  await drizzle(c.env.DB).insert(catalogItems).values({ id, ...input, notes: input.notes ?? null, createdAt: timestamp, updatedAt: timestamp }).run(); await auditStatement(c.env.DB, actor, "create", "catalog_item", id).run();
+api.post("/catalog", zValidator("json", catalogWithOfferInput), async (c) => {
+  const { retailerOffer, ...input } = c.req.valid("json"), id = crypto.randomUUID(), timestamp = now(), actor = c.get("actorEmail");
+  const statements: D1PreparedStatement[] = [
+    c.env.DB.prepare("INSERT INTO catalog_items(id, description, unit, default_price_cents, active, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(id, input.description, input.unit, input.defaultPriceCents, input.active ? 1 : 0, input.notes ?? null, timestamp, timestamp),
+    auditStatement(c.env.DB, actor, "create", "catalog_item", id)
+  ];
+  if (retailerOffer) {
+    const offerId = crypto.randomUUID();
+    statements.push(
+      c.env.DB.prepare("INSERT INTO retailer_offers(id, catalog_item_id, retailer, sku, model_or_upc, product_url, store_context, observed_price_cents, observed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(offerId, id, retailerOffer.retailer, retailerOffer.sku ?? null, retailerOffer.modelOrUpc ?? null, retailerOffer.productUrl || null, retailerOffer.storeContext ?? null, retailerOffer.observedPriceCents, retailerOffer.observedAt, timestamp, timestamp),
+      c.env.DB.prepare("INSERT INTO price_history(id, retailer_offer_id, price_cents, observed_at, source, created_at) VALUES (?, ?, ?, ?, 'manual', ?)").bind(crypto.randomUUID(), offerId, retailerOffer.observedPriceCents, retailerOffer.observedAt, timestamp),
+      auditStatement(c.env.DB, actor, "create", "retailer_offer", offerId, { catalogItemId: id })
+    );
+  }
+  await c.env.DB.batch(statements);
   return c.json({ data: await drizzle(c.env.DB).select().from(catalogItems).where(eq(catalogItems.id, id)).get() }, 201);
 });
 api.patch("/catalog/:id", zValidator("param", idParam), zValidator("json", catalogInput), async (c) => {
