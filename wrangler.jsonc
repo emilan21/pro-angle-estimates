@@ -6,6 +6,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
+  "triggers": { "crons": ["0 6 * * *"] },
   "assets": { "directory": "./dist/client", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*"] },
   "d1_databases": [{ "binding": "DB", "database_name": "pro-angle-estimates-production", "database_id": "9860a6cf-9396-4a01-950b-3185a5f4f150", "migrations_dir": "migrations" }],
   "r2_buckets": [
@@ -14,7 +15,7 @@
   ],
   "browser": { "binding": "BROWSER" },
   "secrets": { "required": ["D1_REST_API_TOKEN", "SMOKE_ACCESS_CLIENT_ID"] },
-  "workflows": [{ "binding": "BACKUP_WORKFLOW", "name": "pro-angle-estimates-backup-production", "class_name": "BackupWorkflow", "schedules": ["0 6 * * *"] }],
+  "workflows": [{ "binding": "BACKUP_WORKFLOW", "name": "pro-angle-estimates-backup-production", "class_name": "BackupWorkflow" }],
   "vars": {
     "ACCESS_TEAM_DOMAIN": "https://rough-wave-e3eb.cloudflareaccess.com",
     "ACCESS_AUD": "910f8fd4bd05a0f72004235910f3519cb4efc1510adfa22c4a2bd62fc2dd417e",

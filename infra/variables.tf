@@ -16,5 +16,9 @@ variable "allowed_email" {
   type    = string
   default = "proangleconstruction@gmail.com"
 }
+variable "google_identity_provider_id" {
+  type    = string
+  default = "8aed7b64-d005-44b9-848e-8bfd9ce23d15"
+}
 
 locals { environments = toset(["production", "staging"]) }

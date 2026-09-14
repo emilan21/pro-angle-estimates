@@ -18,5 +18,13 @@ app.use("*", async (c, next) => {
 app.route("/api/v1", api);
 app.notFound(async (c) => c.env.ASSETS.fetch(c.req.raw));
 
-export default { fetch: app.fetch } satisfies ExportedHandler<Env>;
+export default {
+  fetch: app.fetch,
+  scheduled(controller, env, ctx) {
+    ctx.waitUntil(env.BACKUP_WORKFLOW.create({
+      id: `backup-${controller.scheduledTime}`,
+      params: { cron: controller.cron, scheduledTime: controller.scheduledTime },
+    }));
+  },
+} satisfies ExportedHandler<Env>;
 export { BackupWorkflow } from "./workflows/backup";

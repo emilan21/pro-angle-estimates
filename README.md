@@ -20,7 +20,7 @@ Private estimate management for Pro Angle Construction. This is a standalone Typ
 4. `npm run db:migrate:local`
 5. `npm run dev`
 
-Before deploying, replace placeholder D1 IDs, Access team domain, audience, account ID, and database ID in `wrangler.jsonc` from OpenTofu outputs. Add `D1_REST_API_TOKEN` and `SMOKE_ACCESS_CLIENT_ID` with `wrangler secret put`. The GitHub production environment also requires `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `SMOKE_ACCESS_CLIENT_ID`, and `SMOKE_ACCESS_CLIENT_SECRET`.
+Before deploying, replace placeholder D1 IDs, Access team domain, audience, account ID, and database ID in `wrangler.jsonc` from OpenTofu outputs. Add `D1_REST_API_TOKEN` (account-level D1 Edit, scoped to this account) and `SMOKE_ACCESS_CLIENT_ID` with `wrangler secret put`. The GitHub production environment also requires `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `SMOKE_ACCESS_CLIENT_ID`, and `SMOKE_ACCESS_CLIENT_SECRET`.
 
 ## Verification
 
