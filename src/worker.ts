@@ -9,8 +9,8 @@ app.use("*", secureHeaders({ contentSecurityPolicy: { defaultSrc: ["'self'"], st
 app.use("*", async (c, next) => {
   const requestId = c.req.header("cf-ray") ?? crypto.randomUUID();
   try {
-    if (String(c.env.LOCAL_DEV_BYPASS) === "true" && new URL(c.req.url).hostname === "localhost") c.set("actorEmail", c.env.ALLOWED_EMAIL);
-    else { const token = c.req.header("cf-access-jwt-assertion"); if (!token) return c.json({ error: { code: "AUTH_REQUIRED", message: "Cloudflare Access authentication is required." } }, 401); const identity = await verifyAccessJwt(token, c.env.ACCESS_TEAM_DOMAIN, c.env.ACCESS_AUD, c.env.ALLOWED_EMAIL, c.env.SMOKE_ACCESS_CLIENT_ID); c.set("actorEmail", identity.email); }
+    if (String(c.env.LOCAL_DEV_BYPASS) === "true" && new URL(c.req.url).hostname === "localhost") c.set("actorEmail", c.env.ALLOWED_EMAILS.split(",")[0].trim());
+    else { const token = c.req.header("cf-access-jwt-assertion"); if (!token) return c.json({ error: { code: "AUTH_REQUIRED", message: "Cloudflare Access authentication is required." } }, 401); const identity = await verifyAccessJwt(token, c.env.ACCESS_TEAM_DOMAIN, c.env.ACCESS_AUD, c.env.ALLOWED_EMAILS, c.env.SMOKE_ACCESS_CLIENT_ID); c.set("actorEmail", identity.email); }
     await next();
     console.log(JSON.stringify({ message: "request", requestId, method: c.req.method, path: c.req.path, status: c.res.status, actor: c.get("actorEmail") }));
   } catch (error) { console.error(JSON.stringify({ message: "request failed", requestId, method: c.req.method, path: c.req.path, error: error instanceof Error ? error.message : "unknown" })); return c.json({ error: { code: "FORBIDDEN", message: "Access denied." } }, 403); }

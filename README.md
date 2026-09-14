@@ -30,7 +30,7 @@ Run `npm run typecheck && npm run lint && npm test && npm audit --audit-level=hi
 
 - `workers.dev` and preview URLs are disabled.
 - Every request, including static assets, requires a verified Access application JWT.
-- Interactive access is restricted to `proangleconstruction@gmail.com`; one scoped Access service token supports CI smoke tests.
+- Interactive access is restricted to the exact Google addresses in `ALLOWED_EMAILS`; one scoped Access service token supports CI smoke tests.
 - Artifact R2 buckets have no public domain. Downloads stream through authenticated endpoints with `private, no-store`.
 - Logs contain request metadata and actor identity, never customer bodies, addresses, tokens, or documents.
 - Estimate versions copy all customer, job, line-item, adjustment, and price data into immutable rows.

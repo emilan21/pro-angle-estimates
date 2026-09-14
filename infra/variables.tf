@@ -12,9 +12,14 @@ variable "github_owner" {
   type    = string
   default = "emilan21"
 }
-variable "allowed_email" {
-  type    = string
-  default = "proangleconstruction@gmail.com"
+variable "allowed_emails" {
+  type = list(string)
+  default = [
+    "proangleconstruction@gmail.com",
+    "eprogram1@gmail.com",
+    "emilan@ericmilan.dev",
+    "edingerkevin75@gmail.com",
+  ]
 }
 variable "google_identity_provider_id" {
   type    = string
