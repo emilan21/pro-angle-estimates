@@ -1,7 +1,7 @@
 resource "github_repository" "app" {
   name                   = "pro-angle-estimates"
-  description            = "Private estimate management for Pro Angle Construction"
-  visibility             = "private"
+  description            = "Estimate management for Pro Angle Construction"
+  visibility             = "public"
   has_issues             = true
   delete_branch_on_merge = true
   allow_merge_commit     = false
