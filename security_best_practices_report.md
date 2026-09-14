@@ -8,7 +8,7 @@ Scope: React/Vite client, Hono Worker API, Cloudflare Access, D1, R2, Browser Ru
 
 The application has a solid security foundation: Cloudflare Access is default-deny and restricted to four exact Google accounts; the Worker independently verifies Access JWT signature, issuer, audience, algorithm, token type, and email; production `workers.dev` and preview URLs are disabled; internal identifiers are UUIDs; D1 writes use bound parameters and Zod validation; generated documents escape dynamic HTML/XML; R2 artifacts and backups have no enabled public domain; and production logging avoids request bodies and document contents.
 
-No critical vulnerability was identified. Two high-priority authorization/CI findings should be addressed before treating the deployment as fully hardened. Eight medium/low findings are defense-in-depth and operational improvements. Production R2 privacy was verified through the Cloudflare API, the latest backup verification Workflow completed successfully, the protected `main` ruleset is active, and `npm audit` reported no high or critical production dependency advisory.
+No critical vulnerability was identified. The application-facing items selected for remediation on 2026-09-14 are now fixed: the CI smoke identity is health-check-only, the SPA and API emit browser security headers, production source maps are disabled, CSV formulas are neutralized, and retailer links require HTTPS. MFA remains delegated to Google by owner decision because Cloudflare's IdP-reported MFA requirement does not support the built-in Google connector; enabling independent Access MFA would require a second enrollment. The remaining high finding concerns CI credential scope rather than the deployed application's request path.
 
 ## Critical findings
 
@@ -16,12 +16,12 @@ None identified.
 
 ## High findings
 
-### SEC-001 — CI smoke identity can access the entire application
+### SEC-001 — Resolved: CI smoke identity was able to access the entire application
 
 - Rule ID: AUTHZ-SERVICE-001
 - Severity: High
 - Location: `src/api/auth.ts`, `identityFromPayload`, lines 15-17; `src/worker.ts`, authentication middleware and API mount, lines 9-18
-- Evidence: a correctly signed Access JWT matching `SMOKE_ACCESS_CLIENT_ID` is converted to `service:<client-id>`, then the same middleware permits it to continue to every `/api/v1` route. The deployed reusable `non_identity` Access policy is attached to the whole production and staging application, not only `/api/v1/health`.
+- Resolution: `src/api/auth.ts`, lines 5-10, now authorizes service identities only for `GET /api/v1/health`; `src/worker.ts`, line 13, returns `403` before routing any other service-token request. `wrangler.jsonc` routes static assets through the same middleware, so the credential cannot load the app shell either. Unit and staging runtime tests cover denied reads, methods, and shell access.
 - Impact: disclosure of the smoke client secret would allow non-human access to customer data, full exports, estimate artifacts, and all mutation endpoints—not merely the intended health check.
 - Fix: after JWT verification, permit a service identity only for `GET /api/v1/health`; reject it for every other route. Add tests for service-token denial on reads, exports, and mutations.
 - Mitigation: rotate the service token after the restriction ships and keep its secret only in the production GitHub environment.
@@ -40,27 +40,27 @@ None identified.
 
 ## Medium findings
 
-### SEC-003 — The SPA shell lacks application security headers and publishes source maps
+### SEC-003 — Resolved: the SPA shell lacked application security headers and published source maps
 
 - Rule ID: REACT-HEADERS-001 / REACT-CONFIG-001
 - Severity: Medium
 - Location: `wrangler.jsonc`, static-assets routing, line 10; `src/worker.ts`, security-header middleware, line 8; `vite.config.ts`, line 8
-- Evidence: an authenticated production request to `/` returned none of CSP, HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, or `Permissions-Policy`, while `/api/v1/health` returned the Hono headers. Static assets bypass the Worker because `run_worker_first` only covers `/api/*`. Production builds also upload `.js.map` files.
+- Resolution: `public/_headers`, lines 1-7, applies CSP, HSTS, nosniff, anti-framing, referrer, and permissions policies to static assets. `src/worker.ts`, line 8, aligns API responses. `vite.config.ts`, line 8, disables source maps, and the production build contains no `.map` files.
 - Impact: the HTML/JS application shell lacks browser defense-in-depth against script injection, framing, MIME confusion, and referrer leakage. Public source maps reveal readable client code and internal structure, although Access still gates the files.
 - Fix: add a Workers Static Assets `_headers` file for the SPA shell and assets, and disable production source-map publication (or upload maps only to a private error service).
 - Mitigation: Cloudflare Access remains in front of the shell, React escapes text by default, and no dangerous HTML injection sink was found.
 - False-positive notes: the result was verified at runtime, so this is not merely an absent repository configuration.
 
-### SEC-004 — Cloudflare Access does not enforce MFA
+### SEC-004 — Accepted risk: Cloudflare Access does not independently enforce MFA
 
 - Rule ID: ACCESS-MFA-001
 - Severity: Medium
 - Location: `infra/main.tf`, company Access policy, lines 81-89; deployed Access policy inspected 2026-09-14
 - Evidence: the allow policy includes four exact emails but has no `require` rule. Production uses a 12-hour session, HttpOnly cookies, and no explicit MFA requirement.
 - Impact: compromise of an allowlisted Google password could grant access to all customer and estimate data if that Google account does not independently enforce strong MFA.
-- Fix: add an Access `Require` rule for the `mfa` authentication method after confirming every allowlisted Google account emits the expected MFA claim; test all four accounts before enforcing.
-- Mitigation: require Google two-step verification on every account now and shorten the Access session if operationally acceptable.
-- False-positive notes: users may already have Google MFA enabled, but Cloudflare is not currently enforcing or attesting it.
+- Decision: keep MFA enforcement at Google. Cloudflare's current IdP-reported MFA enforcement supports Generic OIDC/SAML, Okta, and Microsoft Entra ID, but not the built-in Google connector. Cloudflare independent MFA would require each user to enroll an additional Access factor, which the owner does not currently require.
+- Mitigation: keep Google two-step verification enabled on every allowlisted account and revisit independent Access MFA if the user set or threat profile grows.
+- False-positive notes: Cloudflare does not attest Google MFA in this configuration; this is an explicit risk decision, not a claim that MFA is absent at Google.
 
 ### SEC-005 — Local OpenTofu state stores a service-token secret with broad file readability
 
@@ -73,12 +73,12 @@ None identified.
 - Mitigation: full-disk encryption and single-user host controls reduce exposure.
 - False-positive notes: no state file is tracked by Git, and no actual secret was printed during this review.
 
-### SEC-006 — CSV exports do not neutralize spreadsheet formulas
+### SEC-006 — Resolved: CSV exports did not neutralize spreadsheet formulas
 
 - Rule ID: EXPORT-FORMULA-001
 - Severity: Medium
 - Location: `src/documents/csv.ts`, `csvCell`, lines 3-5; `src/documents/backup.ts`, lines 8-11
-- Evidence: RFC 4180 quoting is applied, but cells beginning with `=`, `+`, `-`, `@`, tab, or carriage return are emitted unchanged. Customer, job, catalog, line-item, and notes data can reach CSV exports.
+- Resolution: `src/documents/csv.ts`, lines 3-7, prefixes formula-like string cells with an apostrophe before RFC 4180 quoting while leaving numeric cells numeric. Tests cover `=`, `+`, `-`, `@`, tab, and carriage return prefixes. The shared helper also protects full-backup CSVs.
 - Impact: opening a crafted CSV in spreadsheet software can evaluate a formula, potentially triggering external requests or misleading the operator. Exploitation requires malicious stored content and a user opening the CSV.
 - Fix: prefix formula-like text cells with an apostrophe (or another documented neutralization strategy) before RFC 4180 quoting; add tests for all formula prefixes. Keep numeric fields numeric.
 - Mitigation: generated XLSX currently writes text using `inlineStr`, not formula cells.
@@ -108,12 +108,12 @@ None identified.
 - Mitigation: `main` requires PRs, linear history, and the `quality` check; workflow permissions are explicitly `contents: read`; installs use the lockfile through `npm ci`.
 - False-positive notes: GitHub's displayed source tag is easier to read but is mutable; SHA pinning is the stronger supply-chain control.
 
-### SEC-009 — Retailer URLs accept non-web schemes
+### SEC-009 — Resolved: retailer URLs accepted non-web schemes
 
 - Rule ID: REACT-URL-001
 - Severity: Low
 - Location: `src/domain/contracts.ts`, line 37; `src/ui/App.tsx`, retailer link rendering, line 69
-- Evidence: `z.url()` accepts `javascript:`, `data:`, and `ftp:` syntactically. React 19 blocks direct `javascript:` links and the UI uses `target="_blank" rel="noreferrer"`, substantially reducing immediate exploitability, but the contract does not enforce the intended Lowe's/Home Depot HTTPS-link use case.
+- Resolution: `src/domain/contracts.ts`, lines 7 and 33-42, restricts stored product URLs to HTTPS, and the catalog form provides matching browser validation. Unit tests reject both `javascript:` and plain HTTP URLs.
 - Impact: an authorized or compromised user could store a confusing or unsafe external scheme and induce another user to open it.
 - Fix: refine the schema to permit only `https:` (optionally `http:` for explicit localhost tests) and add unit tests.
 - Mitigation: React's URL protection and `noreferrer` are active.
@@ -147,14 +147,11 @@ None identified.
 
 ## Recommended remediation order
 
-1. Restrict the smoke service identity to the health endpoint and rotate it.
-2. Remove production credentials from PR CI and move deploy/smoke secrets to the protected production environment; rotate them.
-3. Add static-asset security headers and stop publishing source maps.
-4. Enforce HTTPS retailer URLs and neutralize CSV formulas.
-5. Enforce MFA after testing all four accounts.
-6. Move OpenTofu state to an encrypted backend and make the local copy owner-only.
-7. Add backup digests plus a scripted, evidenced restore drill.
-8. Pin GitHub Actions, enable repository security automation, and add conservative rate limits.
+1. Move OpenTofu state to an encrypted backend and make the local copy owner-only.
+2. Add backup digests plus a scripted, evidenced restore drill.
+3. Add conservative per-identity rate and size limits if usage or the user set grows.
+4. Separately, improve CI secret scoping and GitHub supply-chain controls when convenient; these are not deployed request-path vulnerabilities.
+5. Revisit independent Access MFA if relying on Google MFA no longer matches the application's risk profile.
 
 ## Reference guidance
 

@@ -1,7 +1,9 @@
 import type { EstimateSnapshot } from "../domain/contracts";
 
 export function csvCell(value: unknown): string {
-  const text = value == null ? "" : String(value);
+  const raw = value == null ? "" : String(value);
+  // Spreadsheet applications can execute formula-like user text when a CSV is opened.
+  const text = typeof value === "string" && /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 

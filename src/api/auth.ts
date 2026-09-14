@@ -2,6 +2,13 @@ import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 
 export type AccessIdentity = { email: string; subject: string };
 
+const smokeHealthPath = "/api/v1/health";
+
+export function canAccessRequest(identity: AccessIdentity, method: string, path: string): boolean {
+  if (!identity.email.startsWith("service:")) return true;
+  return method.toUpperCase() === "GET" && path === smokeHealthPath;
+}
+
 export async function verifyAccessJwt(token: string, teamDomain: string, audience: string, allowedEmails: string, smokeClientId?: string): Promise<AccessIdentity> {
   const issuer = teamDomain.replace(/\/$/, "");
   const jwks = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`));
