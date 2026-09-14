@@ -51,6 +51,7 @@ resource "cloudflare_worker" "app" {
   for_each      = local.environments
   account_id    = var.cloudflare_account_id
   name          = each.key == "production" ? "pro-angle-estimates" : "pro-angle-estimates-staging"
+  tags          = ["cf:environment=${each.key}", "cf:service=pro-angle-estimates"]
   subdomain     = { enabled = false, previews_enabled = false }
   observability = { enabled = true, head_sampling_rate = 1, logs = { enabled = true, head_sampling_rate = 1, invocation_logs = true, persist = true }, traces = { enabled = true, head_sampling_rate = 0.1, persist = true } }
 }
@@ -91,10 +92,17 @@ resource "cloudflare_zero_trust_access_policy" "company_email" {
   name             = "Allow Pro Angle company Gmail"
   decision         = "allow"
   session_duration = "12h"
-  include          = [{ email = { email = var.allowed_email } }, { service_token = { token_id = cloudflare_zero_trust_access_service_token.smoke.id } }]
+  include          = [{ email = { email = var.allowed_email } }]
   lifecycle {
     create_before_destroy = true
   }
+}
+
+resource "cloudflare_zero_trust_access_policy" "smoke_service" {
+  account_id = var.cloudflare_account_id
+  name       = "Authenticate Pro Angle CI smoke checks"
+  decision   = "non_identity"
+  include    = [{ service_token = { token_id = cloudflare_zero_trust_access_service_token.smoke.id } }]
 }
 
 resource "cloudflare_zero_trust_access_application" "app" {
@@ -106,7 +114,7 @@ resource "cloudflare_zero_trust_access_application" "app" {
   session_duration          = "12h"
   auto_redirect_to_identity = false
   app_launcher_visible      = false
-  policies                  = [{ id = cloudflare_zero_trust_access_policy.company_email.id, precedence = 1 }]
+  policies                  = [{ id = cloudflare_zero_trust_access_policy.smoke_service.id, precedence = 1 }, { id = cloudflare_zero_trust_access_policy.company_email.id, precedence = 2 }]
 }
 
 resource "cloudflare_workers_custom_domain" "app" {
