@@ -1,0 +1,7 @@
+@media (max-width: 900px) {
+  .profile {
+    display: flex;
+    margin-top: 12px;
+    padding-top: 12px;
+  }
+}
