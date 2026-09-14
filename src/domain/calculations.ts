@@ -23,6 +23,10 @@ export function calculateEstimate(lines: Pick<LineItemInput, "quantity" | "unitP
   return { subtotalCents, markupCents, discountCents, taxCents, totalCents, depositCents, balanceDueCents: totalCents - depositCents };
 }
 
+export function calculateEstimateCharges(lines: Array<{ amountCents: number }>, adjustments: AdjustmentInput[]): EstimateTotals {
+  return calculateEstimate(lines.map((line) => ({ quantity: 1, unitPriceCents: line.amountCents })), adjustments);
+}
+
 export function formatMoney(valueCents: number): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(valueCents / 100);
 }

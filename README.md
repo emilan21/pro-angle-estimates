@@ -35,4 +35,13 @@ Run `npm run typecheck && npm run lint && npm test && npm audit --audit-level=hi
 - Logs contain request metadata and actor identity, never customer bodies, addresses, tokens, or documents.
 - Estimate versions copy all customer, job, line-item, adjustment, and price data into immutable rows.
 
+## Estimate workflow
+
+- Jobs keep editable names, addresses, scopes, and notes.
+- Each job has one autosaved estimate draft with flat customer-facing charges and optional markup, discount, tax, and deposit adjustments.
+- Finalizing removes the working draft, creates an immutable version, and generates private PDF, XLSX, and CSV artifacts. Opening the job again starts a revision prefilled from the latest version.
+- Job materials are independent internal planning rows. The reusable Materials library continues to use the physical `catalog_items` tables for migration compatibility.
+- Backups include both a relational debugging ZIP and a customer/job-folder ZIP with checksums.
+- Send / Share uses the phone's native file share capability when available and otherwise offers a private PDF download plus a prefilled email composer. Artifacts are never made public.
+
 See [restore.md](docs/restore.md) and [operations.md](docs/operations.md) before launch.
