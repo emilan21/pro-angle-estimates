@@ -8,6 +8,8 @@
 4. Push through a pull request. The protected `main` branch requires the `quality` check and linear history, with no outside approval requirement for the sole maintainer.
 5. Confirm production rejects other Google identities, missing/expired/wrong-audience JWTs, and direct Worker access.
 
+The first infrastructure apply on 2026-09-13 created both D1 databases and both Worker registrations, adopted the private repository, and enabled vulnerability alerts. The local `infra/terraform.tfstate` is authoritative until a remote encrypted state backend is configured; it is intentionally ignored by Git. Remaining resources require a Cloudflare token with Workers Scripts, R2 Storage, Access Apps/Policies, and Access Service Tokens write scopes. GitHub rulesets for private repositories also require upgrading the owner to GitHub Pro; do not make the repository public as a workaround.
+
 ## Backups and retention
 
 The scheduled Workflow starts a D1 export, polls the Cloudflare export API, streams the SQL dump to private R2, and writes a manifest. On the first of each month the stream is also stored under `monthly/`. `daily/` objects expire after 90 days; monthly objects expire after 396 days (at least 13 months). Workflow failures appear in Worker/Workflow logs and must be investigated the same business day.
