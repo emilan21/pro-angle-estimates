@@ -29,7 +29,7 @@ Run `npm run typecheck && npm run lint && npm test && npm audit --audit-level=hi
 ## Security properties
 
 - `workers.dev` and preview URLs are disabled.
-- Every request, including static assets, requires a verified Access application JWT.
+- Cloudflare Access protects the application host, and every `/api/*` request also requires a verified Access application JWT inside the Worker.
 - Interactive access is restricted to the exact Google addresses in `ALLOWED_EMAILS`; one scoped Access service token supports CI smoke tests.
 - Artifact R2 buckets have no public domain. Downloads stream through authenticated endpoints with `private, no-store`.
 - Logs contain request metadata and actor identity, never customer bodies, addresses, tokens, or documents.
