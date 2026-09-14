@@ -68,6 +68,10 @@ export const estimateGenerationInput = z.object({
   adjustments: z.array(adjustmentInput).max(4).refine((items) => new Set(items.map((item) => item.kind)).size === items.length, "Each adjustment kind may appear once")
 }).strict();
 
+export const clearWorkspaceInput = z.object({
+  confirmation: z.literal("CLEAR ALL DATA")
+}).strict();
+
 export type CustomerInput = z.infer<typeof customerInput>;
 export type JobInput = z.infer<typeof jobInput>;
 export type CatalogInput = z.infer<typeof catalogInput>;
