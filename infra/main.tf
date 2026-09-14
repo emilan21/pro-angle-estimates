@@ -80,10 +80,10 @@ resource "cloudflare_zero_trust_access_service_token" "smoke" {
 
 resource "cloudflare_zero_trust_access_policy" "company_email" {
   account_id       = var.cloudflare_account_id
-  name             = "Allow Pro Angle company Gmail"
+  name             = "Allow Pro Angle estimate users"
   decision         = "allow"
   session_duration = "12h"
-  include          = [{ email = { email = var.allowed_email } }]
+  include          = [for allowed_email in var.allowed_emails : { email = { email = allowed_email } }]
   lifecycle {
     create_before_destroy = true
   }

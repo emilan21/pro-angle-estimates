@@ -19,7 +19,7 @@
   "vars": {
     "ACCESS_TEAM_DOMAIN": "https://rough-wave-e3eb.cloudflareaccess.com",
     "ACCESS_AUD": "910f8fd4bd05a0f72004235910f3519cb4efc1510adfa22c4a2bd62fc2dd417e",
-    "ALLOWED_EMAIL": "proangleconstruction@gmail.com",
+    "ALLOWED_EMAILS": "proangleconstruction@gmail.com,eprogram1@gmail.com,emilan@ericmilan.dev,edingerkevin75@gmail.com",
     "LOCAL_DEV_BYPASS": "false",
     "ACCOUNT_ID": "14610bd4acb62d09ffc284286b59507e",
     "DATABASE_ID": "9860a6cf-9396-4a01-950b-3185a5f4f150"
@@ -29,12 +29,13 @@
     "staging": {
       "name": "pro-angle-estimates-staging",
       "workers_dev": false,
+      "triggers": { "crons": [] },
       "d1_databases": [{ "binding": "DB", "database_name": "pro-angle-estimates-staging", "database_id": "320844c4-16c2-4110-bf0e-5f1f6c41f1d2", "migrations_dir": "migrations" }],
       "r2_buckets": [{ "binding": "ARTIFACTS", "bucket_name": "pro-angle-estimates-artifacts-staging" }, { "binding": "BACKUPS", "bucket_name": "pro-angle-estimates-backups-staging" }],
       "browser": { "binding": "BROWSER" },
       "secrets": { "required": ["SMOKE_ACCESS_CLIENT_ID"] },
       "workflows": [{ "binding": "BACKUP_WORKFLOW", "name": "pro-angle-estimates-backup-staging", "class_name": "BackupWorkflow" }],
-      "vars": { "ACCESS_TEAM_DOMAIN": "https://rough-wave-e3eb.cloudflareaccess.com", "ACCESS_AUD": "603ddccd52fe0ac5fd8ef5764cfdf9b58ae78f1979682c8c9342f0a1c9c33ca1", "ALLOWED_EMAIL": "proangleconstruction@gmail.com", "LOCAL_DEV_BYPASS": "false", "ACCOUNT_ID": "14610bd4acb62d09ffc284286b59507e", "DATABASE_ID": "320844c4-16c2-4110-bf0e-5f1f6c41f1d2" }
+      "vars": { "ACCESS_TEAM_DOMAIN": "https://rough-wave-e3eb.cloudflareaccess.com", "ACCESS_AUD": "603ddccd52fe0ac5fd8ef5764cfdf9b58ae78f1979682c8c9342f0a1c9c33ca1", "ALLOWED_EMAILS": "proangleconstruction@gmail.com,eprogram1@gmail.com,emilan@ericmilan.dev,edingerkevin75@gmail.com", "LOCAL_DEV_BYPASS": "false", "ACCOUNT_ID": "14610bd4acb62d09ffc284286b59507e", "DATABASE_ID": "320844c4-16c2-4110-bf0e-5f1f6c41f1d2" }
     }
   }
 }
