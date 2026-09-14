@@ -21,7 +21,7 @@ None identified.
 - Rule ID: AUTHZ-SERVICE-001
 - Severity: High
 - Location: `src/api/auth.ts`, `identityFromPayload`, lines 15-17; `src/worker.ts`, authentication middleware and API mount, lines 9-18
-- Resolution: `src/api/auth.ts`, lines 5-10, now authorizes service identities only for `GET /api/v1/health`; `src/worker.ts`, line 13, returns `403` before routing any other service-token request. `wrangler.jsonc` routes static assets through the same middleware, so the credential cannot load the app shell either. Unit and staging runtime tests cover denied reads, methods, and shell access.
+- Resolution: `src/api/auth.ts`, lines 5-10, now authorizes service identities only for `GET /api/v1/health`; `src/worker.ts`, line 13, returns `403` before routing any other service-token API request. Static assets contain no customer data or credentials and remain protected at the Cloudflare Access application boundary. Unit and staging runtime tests cover denied API reads and mutations.
 - Impact: disclosure of the smoke client secret would allow non-human access to customer data, full exports, estimate artifacts, and all mutation endpoints—not merely the intended health check.
 - Fix: after JWT verification, permit a service identity only for `GET /api/v1/health`; reject it for every other route. Add tests for service-token denial on reads, exports, and mutations.
 - Mitigation: rotate the service token after the restriction ships and keep its secret only in the production GitHub environment.
