@@ -4,6 +4,7 @@ export const nonEmpty = z.string().trim().min(1).max(500);
 export const optionalText = z.string().trim().max(4_000).nullish();
 export const cents = z.number().int().min(0).max(100_000_000);
 export const quantity = z.number().positive().max(1_000_000);
+export const httpsUrl = z.url().refine((value) => new URL(value).protocol === "https:", "Product URL must use HTTPS");
 
 export const customerInput = z.object({
   name: nonEmpty,
@@ -34,7 +35,7 @@ export const retailerOfferInput = z.object({
   retailer: nonEmpty.max(120),
   sku: z.string().trim().max(120).nullish(),
   modelOrUpc: z.string().trim().max(120).nullish(),
-  productUrl: z.url().nullish().or(z.literal("")),
+  productUrl: z.union([httpsUrl, z.literal("")]).nullish(),
   storeContext: z.string().trim().max(250).nullish(),
   observedPriceCents: cents,
   observedAt: z.iso.datetime()

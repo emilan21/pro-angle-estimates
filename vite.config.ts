@@ -5,6 +5,6 @@ import { defineConfig } from "vite";
 
 export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss(), ...(mode === "test" ? [] : [cloudflare()])],
-  build: { sourcemap: true },
+  build: { sourcemap: false },
   server: { port: 5173 }
 }));
