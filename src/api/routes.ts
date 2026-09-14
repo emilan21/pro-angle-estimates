@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 import { calculateEstimate, lineAmountCents } from "../domain/calculations";
-import { catalogInput, catalogWithOfferInput, customerInput, estimateGenerationInput, jobInput, lineItemInput, retailerOfferInput, type AdjustmentInput, type EstimateSnapshot } from "../domain/contracts";
+import { catalogInput, catalogWithOfferInput, clearWorkspaceInput, customerInput, estimateGenerationInput, jobInput, lineItemInput, retailerOfferInput, type AdjustmentInput, type EstimateSnapshot } from "../domain/contracts";
 import { safeArtifactFilename } from "../domain/ids";
 import { artifacts, catalogItems, customers, estimates, jobLineItems, jobs, priceHistory, retailerOffers } from "../db/schema";
 import { fullExportZip } from "../documents/backup";
@@ -41,6 +41,24 @@ api.patch("/customers/:id", zValidator("param", idParam), zValidator("json", cus
   await auditStatement(c.env.DB, actor, "update", "customer", id).run();
   return c.json({ data: updated });
 });
+api.delete("/customers/:id", zValidator("param", idParam), async (c) => {
+  const id = c.req.valid("param").id, actor = c.get("actorEmail");
+  const customer = await c.env.DB.prepare("SELECT id, display_id AS displayId FROM customers WHERE id = ?").bind(id).first<{ id: string; displayId: string }>();
+  if (!customer) return apiError(c, 404, "NOT_FOUND", "Customer not found.");
+  const artifactRows = await c.env.DB.prepare("SELECT a.object_key AS objectKey FROM artifacts a JOIN estimates e ON e.id = a.estimate_id JOIN jobs j ON j.id = e.job_id WHERE j.customer_id = ?").bind(id).all<{ objectKey: string }>();
+  if (!await removeArtifactKeys(c.env.ARTIFACTS, artifactRows.results.map((row) => row.objectKey), "customer", id)) return apiError(c, 502, "ARTIFACT_DELETE_FAILED", "Generated files could not be deleted. No records were changed; retry deletion.");
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM estimate_adjustments WHERE estimate_id IN (SELECT e.id FROM estimates e JOIN jobs j ON j.id = e.job_id WHERE j.customer_id = ?)").bind(id),
+    c.env.DB.prepare("DELETE FROM estimate_line_items WHERE estimate_id IN (SELECT e.id FROM estimates e JOIN jobs j ON j.id = e.job_id WHERE j.customer_id = ?)").bind(id),
+    c.env.DB.prepare("DELETE FROM artifacts WHERE estimate_id IN (SELECT e.id FROM estimates e JOIN jobs j ON j.id = e.job_id WHERE j.customer_id = ?)").bind(id),
+    c.env.DB.prepare("DELETE FROM estimates WHERE job_id IN (SELECT id FROM jobs WHERE customer_id = ?)").bind(id),
+    c.env.DB.prepare("DELETE FROM job_line_items WHERE job_id IN (SELECT id FROM jobs WHERE customer_id = ?)").bind(id),
+    c.env.DB.prepare("DELETE FROM jobs WHERE customer_id = ?").bind(id),
+    c.env.DB.prepare("DELETE FROM customers WHERE id = ?").bind(id),
+    auditStatement(c.env.DB, actor, "delete", "customer", id, { displayId: customer.displayId, cascade: true })
+  ]);
+  return c.body(null, 204);
+});
 
 api.get("/jobs", async (c) => {
   const rows = await c.env.DB.prepare("SELECT j.*, c.name AS customer_name, c.display_id AS customer_display_id FROM jobs j JOIN customers c ON c.id = j.customer_id ORDER BY j.created_at DESC").all();
@@ -53,6 +71,23 @@ api.post("/jobs", zValidator("json", jobInput), async (c) => {
   try { await c.env.DB.batch([counter, insert, c.env.DB.prepare("UPDATE counters SET next_value = next_value + 1, updated_at = ? WHERE scope = ?").bind(timestamp, scope), auditStatement(c.env.DB, actor, "create", "job", id)]); }
   catch { return apiError(c, 422, "INVALID_CUSTOMER", "The selected customer does not exist."); }
   return c.json({ data: await drizzle(c.env.DB).select().from(jobs).where(eq(jobs.id, id)).get() }, 201);
+});
+api.delete("/jobs/:id", zValidator("param", idParam), async (c) => {
+  const id = c.req.valid("param").id, actor = c.get("actorEmail");
+  const job = await c.env.DB.prepare("SELECT id, display_id AS displayId FROM jobs WHERE id = ?").bind(id).first<{ id: string; displayId: string }>();
+  if (!job) return apiError(c, 404, "NOT_FOUND", "Job not found.");
+  const artifactRows = await c.env.DB.prepare("SELECT a.object_key AS objectKey FROM artifacts a JOIN estimates e ON e.id = a.estimate_id WHERE e.job_id = ?").bind(id).all<{ objectKey: string }>();
+  if (!await removeArtifactKeys(c.env.ARTIFACTS, artifactRows.results.map((row) => row.objectKey), "job", id)) return apiError(c, 502, "ARTIFACT_DELETE_FAILED", "Generated files could not be deleted. No records were changed; retry deletion.");
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM estimate_adjustments WHERE estimate_id IN (SELECT id FROM estimates WHERE job_id = ?)").bind(id),
+    c.env.DB.prepare("DELETE FROM estimate_line_items WHERE estimate_id IN (SELECT id FROM estimates WHERE job_id = ?)").bind(id),
+    c.env.DB.prepare("DELETE FROM artifacts WHERE estimate_id IN (SELECT id FROM estimates WHERE job_id = ?)").bind(id),
+    c.env.DB.prepare("DELETE FROM estimates WHERE job_id = ?").bind(id),
+    c.env.DB.prepare("DELETE FROM job_line_items WHERE job_id = ?").bind(id),
+    c.env.DB.prepare("DELETE FROM jobs WHERE id = ?").bind(id),
+    auditStatement(c.env.DB, actor, "delete", "job", id, { displayId: job.displayId, cascade: true })
+  ]);
+  return c.body(null, 204);
 });
 
 api.get("/jobs/:id/line-items", zValidator("param", idParam), async (c) => c.json({ data: await drizzle(c.env.DB).select().from(jobLineItems).where(eq(jobLineItems.jobId, c.req.valid("param").id)).orderBy(jobLineItems.position).all() }));
@@ -101,6 +136,19 @@ api.patch("/catalog/:id", zValidator("param", idParam), zValidator("json", catal
   await auditStatement(c.env.DB, actor, "update", "catalog_item", id).run();
   return c.json({ data: updated });
 });
+api.delete("/catalog/:id", zValidator("param", idParam), async (c) => {
+  const id = c.req.valid("param").id, actor = c.get("actorEmail");
+  const item = await drizzle(c.env.DB).select().from(catalogItems).where(eq(catalogItems.id, id)).get();
+  if (!item) return apiError(c, 404, "NOT_FOUND", "Catalog item not found.");
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM price_history WHERE retailer_offer_id IN (SELECT id FROM retailer_offers WHERE catalog_item_id = ?)").bind(id),
+    c.env.DB.prepare("DELETE FROM retailer_offers WHERE catalog_item_id = ?").bind(id),
+    c.env.DB.prepare("UPDATE job_line_items SET catalog_item_id = NULL, updated_at = ? WHERE catalog_item_id = ?").bind(now(), id),
+    c.env.DB.prepare("DELETE FROM catalog_items WHERE id = ?").bind(id),
+    auditStatement(c.env.DB, actor, "delete", "catalog_item", id, { description: item.description })
+  ]);
+  return c.body(null, 204);
+});
 api.get("/catalog/:id/retailer-offers", zValidator("param", idParam), async (c) => c.json({ data: await drizzle(c.env.DB).select().from(retailerOffers).where(eq(retailerOffers.catalogItemId, c.req.valid("param").id)).orderBy(desc(retailerOffers.observedAt)).all() }));
 api.post("/retailer-offers", zValidator("json", retailerOfferInput), async (c) => {
   const input = c.req.valid("json"), id = crypto.randomUUID(), historyId = crypto.randomUUID(), timestamp = now(), actor = c.get("actorEmail");
@@ -117,6 +165,17 @@ api.patch("/retailer-offers/:id", zValidator("param", idParam), zValidator("json
   if (current.observedPriceCents !== input.observedPriceCents || current.observedAt !== input.observedAt) await drizzle(c.env.DB).insert(priceHistory).values({ id: crypto.randomUUID(), retailerOfferId: id, priceCents: input.observedPriceCents, observedAt: input.observedAt, source: "manual", createdAt: timestamp }).run();
   await auditStatement(c.env.DB, actor, "update", "retailer_offer", id, { catalogItemId: input.catalogItemId }).run();
   return c.json({ data: updated });
+});
+api.delete("/retailer-offers/:id", zValidator("param", idParam), async (c) => {
+  const id = c.req.valid("param").id, actor = c.get("actorEmail");
+  const offer = await drizzle(c.env.DB).select().from(retailerOffers).where(eq(retailerOffers.id, id)).get();
+  if (!offer) return apiError(c, 404, "NOT_FOUND", "Retailer offer not found.");
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM price_history WHERE retailer_offer_id = ?").bind(id),
+    c.env.DB.prepare("DELETE FROM retailer_offers WHERE id = ?").bind(id),
+    auditStatement(c.env.DB, actor, "delete", "retailer_offer", id, { catalogItemId: offer.catalogItemId })
+  ]);
+  return c.body(null, 204);
 });
 
 api.get("/estimates", async (c) => {
@@ -146,6 +205,21 @@ api.post("/jobs/:id/estimates", zValidator("param", idParam), zValidator("json",
   const generated = await generateArtifacts(c.env, snapshot);
   return c.json({ data: { ...created, artifacts: generated } }, 201);
 });
+api.delete("/estimates/:id", zValidator("param", idParam), async (c) => {
+  const id = c.req.valid("param").id, actor = c.get("actorEmail");
+  const estimate = await drizzle(c.env.DB).select().from(estimates).where(eq(estimates.id, id)).get();
+  if (!estimate) return apiError(c, 404, "NOT_FOUND", "Estimate not found.");
+  const artifactRows = await c.env.DB.prepare("SELECT object_key AS objectKey FROM artifacts WHERE estimate_id = ?").bind(id).all<{ objectKey: string }>();
+  if (!await removeArtifactKeys(c.env.ARTIFACTS, artifactRows.results.map((row) => row.objectKey), "estimate", id)) return apiError(c, 502, "ARTIFACT_DELETE_FAILED", "Generated files could not be deleted. No records were changed; retry deletion.");
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM estimate_adjustments WHERE estimate_id = ?").bind(id),
+    c.env.DB.prepare("DELETE FROM estimate_line_items WHERE estimate_id = ?").bind(id),
+    c.env.DB.prepare("DELETE FROM artifacts WHERE estimate_id = ?").bind(id),
+    c.env.DB.prepare("DELETE FROM estimates WHERE id = ?").bind(id),
+    auditStatement(c.env.DB, actor, "delete", "estimate", id, { displayId: estimate.displayId })
+  ]);
+  return c.body(null, 204);
+});
 
 api.get("/artifacts/:id/download", zValidator("param", idParam), async (c) => {
   const artifact = await drizzle(c.env.DB).select().from(artifacts).where(eq(artifacts.id, c.req.valid("param").id)).get();
@@ -160,6 +234,52 @@ api.get("/export", async (c) => {
   const tables = await Promise.all(tableNames.map(async (name) => ({ name: name === "job_line_items" ? "line_items" : name === "catalog_items" ? "catalog" : name, rows: (await c.env.DB.prepare(`SELECT * FROM ${name}`).all()).results as Record<string, unknown>[] })));
   const data = fullExportZip(tables); return new Response(data as BodyInit, { headers: { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="pro-angle-full-export-${new Date().toISOString().slice(0, 10)}.zip"`, "Cache-Control": "private, no-store" } });
 });
+
+api.delete("/workspace-data", zValidator("json", clearWorkspaceInput), async (c) => {
+  const actor = c.get("actorEmail"), timestamp = now();
+  if (!await removeAllArtifactObjects(c.env.ARTIFACTS)) return apiError(c, 502, "ARTIFACT_DELETE_FAILED", "Generated files could not be cleared. No database records were changed; retry the operation.");
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM price_history"),
+    c.env.DB.prepare("DELETE FROM retailer_offers"),
+    c.env.DB.prepare("DELETE FROM estimate_adjustments"),
+    c.env.DB.prepare("DELETE FROM estimate_line_items"),
+    c.env.DB.prepare("DELETE FROM artifacts"),
+    c.env.DB.prepare("DELETE FROM estimates"),
+    c.env.DB.prepare("DELETE FROM job_line_items"),
+    c.env.DB.prepare("DELETE FROM jobs"),
+    c.env.DB.prepare("DELETE FROM catalog_items"),
+    c.env.DB.prepare("DELETE FROM customers"),
+    c.env.DB.prepare("DELETE FROM settings"),
+    c.env.DB.prepare("DELETE FROM counters"),
+    c.env.DB.prepare("DELETE FROM audit_events"),
+    c.env.DB.prepare("INSERT INTO counters(scope, next_value, updated_at) VALUES ('customer', 1, ?)").bind(timestamp),
+    auditStatement(c.env.DB, actor, "clear", "workspace", "all", { generatedArtifactsDeleted: true, backupsPreserved: true })
+  ]);
+  return c.body(null, 204);
+});
+
+async function deleteArtifactKeys(bucket: R2Bucket, keys: string[]) {
+  for (let offset = 0; offset < keys.length; offset += 1_000) await bucket.delete(keys.slice(offset, offset + 1_000));
+}
+
+async function removeArtifactKeys(bucket: R2Bucket, keys: string[], entityType: string, entityId: string) {
+  try { await deleteArtifactKeys(bucket, keys); return true; }
+  catch (error) { console.error(JSON.stringify({ message: "artifact deletion failed", entityType, entityId, error: error instanceof Error ? error.message : "unknown" })); return false; }
+}
+
+async function removeAllArtifactObjects(bucket: R2Bucket) {
+  try {
+    const keys: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await bucket.list({ cursor });
+      keys.push(...page.objects.map((object) => object.key));
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    await deleteArtifactKeys(bucket, keys);
+    return true;
+  } catch (error) { console.error(JSON.stringify({ message: "workspace artifact clear failed", error: error instanceof Error ? error.message : "unknown" })); return false; }
+}
 
 async function generateArtifacts(env: Env, snapshot: EstimateSnapshot) {
   const outputs: Array<{ format: "csv" | "xlsx" | "pdf"; data?: Uint8Array; contentType: string; error?: string }> = [

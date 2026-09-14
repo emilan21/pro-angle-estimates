@@ -4,7 +4,7 @@ import { customerDisplayId, estimateDisplayId, jobDisplayId, safeArtifactFilenam
 import { likelySameProduct, normalizeRetailerIdentity } from "../src/domain/retailers";
 import { catalogFormPayload, catalogWithOfferFormPayload, jobLineFormPayload, retailerOfferFormPayload } from "../src/ui/forms";
 import { accessIdentityFromUnknown } from "../src/ui/api";
-import { retailerOfferInput } from "../src/domain/contracts";
+import { clearWorkspaceInput, retailerOfferInput } from "../src/domain/contracts";
 
 describe("estimate domain", () => {
   it("allocates stable display identifiers", () => { expect(customerDisplayId(1)).toBe("C-0001"); expect(jobDisplayId(2026,1)).toBe("J-2026-0001"); expect(estimateDisplayId("J-2026-0001",1)).toBe("EST-J-2026-0001-v01"); });
@@ -25,5 +25,10 @@ describe("estimate domain", () => {
   it("uses the authenticated profile name with a safe email fallback", () => {
     expect(accessIdentityFromUnknown({ name: "Eric Milan", email: "emilan@ericmilan.dev" })).toEqual({ name: "Eric Milan", email: "emilan@ericmilan.dev" });
     expect(accessIdentityFromUnknown({ email: "eprogram1@gmail.com" })).toEqual({ name: "eprogram1", email: "eprogram1@gmail.com" });
+  });
+  it("requires the exact destructive workspace confirmation phrase", () => {
+    expect(clearWorkspaceInput.safeParse({ confirmation: "CLEAR ALL DATA" }).success).toBe(true);
+    expect(clearWorkspaceInput.safeParse({ confirmation: "clear all data" }).success).toBe(false);
+    expect(clearWorkspaceInput.safeParse({ confirmation: "CLEAR ALL DATA", force: true }).success).toBe(false);
   });
 });
