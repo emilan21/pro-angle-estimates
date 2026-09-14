@@ -8,6 +8,8 @@
 4. Push through a pull request. The protected `main` branch requires the `quality` check and linear history, with no outside approval requirement for the sole maintainer.
 5. Confirm production rejects other Google identities, missing/expired/wrong-audience JWTs, and direct Worker access.
 
+OpenTofu owns the production and staging custom domains. Wrangler deploys code and bindings without managing routes, preventing two tools from competing for the same hostname.
+
 The first infrastructure apply on 2026-09-13 created both D1 databases and both Worker registrations, adopted the repository, and enabled vulnerability alerts. The local `infra/terraform.tfstate` is authoritative until a remote encrypted state backend is configured; it is intentionally ignored by Git. Remaining resources require a Cloudflare token with Workers Scripts, R2 Storage, Access Apps/Policies, and Access Service Tokens write scopes. The repository is public so GitHub Free can enforce the declared branch ruleset.
 
 ## Backups and retention
