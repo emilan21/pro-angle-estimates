@@ -4,7 +4,8 @@ import { customerDisplayId, estimateDisplayId, jobDisplayId, safeArtifactFilenam
 import { likelySameProduct, normalizeRetailerIdentity } from "../src/domain/retailers";
 import { catalogFormPayload, catalogWithOfferFormPayload, jobLineFormPayload, retailerOfferFormPayload } from "../src/ui/forms";
 import { accessIdentityFromUnknown } from "../src/ui/api";
-import { clearWorkspaceInput, customerAddressInput, retailerOfferInput } from "../src/domain/contracts";
+import { formatAddress } from "../src/domain/addresses";
+import { clearWorkspaceInput, contractorSettingsInput, customerAddressInput, retailerOfferInput } from "../src/domain/contracts";
 
 describe("estimate domain", () => {
   it("allocates stable display identifiers", () => { expect(customerDisplayId(1)).toBe("C-0001"); expect(jobDisplayId(2026,1)).toBe("J-2026-0001"); expect(estimateDisplayId("J-2026-0001",1)).toBe("EST-J-2026-0001-v01"); });
@@ -12,6 +13,7 @@ describe("estimate domain", () => {
   it("applies markup, discount, tax, deposit in order", () => expect(calculateEstimate([{quantity:2,unitPriceCents:1000}],[{kind:"markup",mode:"percent",value:1000},{kind:"discount",mode:"fixed",value:200},{kind:"tax",mode:"percent",value:600},{kind:"deposit",mode:"percent",value:5000}])).toEqual({subtotalCents:2000,markupCents:200,discountCents:200,taxCents:120,totalCents:2120,depositCents:1060,balanceDueCents:1060}));
   it("omits blank adjustments by producing subtotal equals total", () => { const total=calculateEstimate([{quantity:3,unitPriceCents:125}],[]); expect(total.totalCents).toBe(375); expect(total.depositCents).toBe(0); });
   it("calculates flat estimate charges with the existing adjustment order", () => expect(calculateEstimateCharges([{amountCents:1000},{amountCents:2500}],[{kind:"markup",mode:"percent",value:1000},{kind:"discount",mode:"fixed",value:500}]).totalCents).toBe(3350));
+  it("treats user-facing whole percentages as hundredths internally", () => expect(calculateEstimateCharges([{amountCents:10_000}],[{kind:"markup",mode:"percent",value:10*100},{kind:"tax",mode:"percent",value:6*100}])).toMatchObject({markupCents:1000,taxCents:660,totalCents:11_660}));
   it("normalizes retailer identities and protects filenames", () => { expect(normalizeRetailerIdentity(" Lowe's #123 ")).toBe("lowe s 123"); expect(likelySameProduct({retailer:"A",modelOrUpc:"ABC-12345"},{retailer:"B",modelOrUpc:"abc 12345"})).toBe(true); expect(safeArtifactFilename("EST-J-2026-0001-v01","A/B Customer","pdf")).toBe("EST-J-2026-0001-v01_A_B_Customer.pdf"); });
   it("maps catalog form values to the strict cents API contract", () => expect(catalogFormPayload({ description: "2x4 stud", unit: "each", defaultPrice: "4.98", notes: "Kiln dried", active: "on" })).toEqual({ description: "2x4 stud", unit: "each", defaultPriceCents: 498, active: true, notes: "Kiln dried" }));
   it("creates a catalog item and initial retailer offer in one payload", () => expect(catalogWithOfferFormPayload({ description: "2x4 stud", unit: "each", defaultPrice: "4.98", active: "on", retailer: "Lowe's", sku: "123", modelOrUpc: "ABC", productUrl: "https://www.lowes.com/pd/example/123", storeContext: "15401", observedPrice: "4.78", observedAt: "2026-09-14T12:00Z" })).toEqual({ description: "2x4 stud", unit: "each", defaultPriceCents: 498, active: true, notes: null, retailerOffer: { retailer: "Lowe's", sku: "123", modelOrUpc: "ABC", productUrl: "https://www.lowes.com/pd/example/123", storeContext: "15401", observedPriceCents: 478, observedAt: "2026-09-14T12:00:00.000Z" } }));
@@ -33,8 +35,11 @@ describe("estimate domain", () => {
     expect(clearWorkspaceInput.safeParse({ confirmation: "CLEAR ALL DATA", force: true }).success).toBe(false);
   });
   it("validates labeled customer addresses and rejects unexpected fields", () => {
-    expect(customerAddressInput.safeParse({ label: "Home", address: "1 Main Street", isDefault: true }).success).toBe(true);
-    expect(customerAddressInput.safeParse({ label: "", address: "1 Main Street", isDefault: false }).success).toBe(false);
-    expect(customerAddressInput.safeParse({ label: "Home", address: "1 Main Street", isDefault: false, customerId: "unexpected" }).success).toBe(false);
+    const address = { label: "Home", addressLine1: "1 Main Street", addressLine2: "Suite 2", city: "Uniontown", state: "PA", postalCode: "15401", isDefault: true };
+    expect(customerAddressInput.safeParse(address).success).toBe(true);
+    expect(customerAddressInput.safeParse({ ...address, city: "" }).success).toBe(false);
+    expect(customerAddressInput.safeParse({ ...address, customerId: "unexpected" }).success).toBe(false);
+    expect(formatAddress(address)).toBe("1 Main Street\nSuite 2\nUniontown, PA 15401");
   });
+  it("validates editable contractor contact information", () => expect(contractorSettingsInput.safeParse({companyName:"Pro Angle Construction",contractorName:"Kevin Edinger",email:"proangleconstruction@gmail.com",phone:"440.429.3474",addressLine1:"188 Kaider Road",addressLine2:null,city:"Uniontown",state:"PA",postalCode:"15401"}).success).toBe(true));
 });

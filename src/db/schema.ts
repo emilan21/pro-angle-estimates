@@ -11,11 +11,11 @@ export const customers = sqliteTable("customers", {
 }, (table) => [index("customers_name_idx").on(table.name)]);
 
 export const customerAddresses = sqliteTable("customer_addresses", {
-  id: text("id").primaryKey(), customerId: text("customer_id").notNull().references(() => customers.id), label: text("label").notNull(), address: text("address").notNull(), isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false), ...timestamps
+  id: text("id").primaryKey(), customerId: text("customer_id").notNull().references(() => customers.id), label: text("label").notNull(), address: text("address").notNull(), addressLine1: text("address_line_1"), addressLine2: text("address_line_2"), city: text("city"), state: text("state"), postalCode: text("postal_code"), isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false), ...timestamps
 }, (table) => [index("customer_address_customer_idx").on(table.customerId), uniqueIndex("customer_address_default_uq").on(table.customerId).where(sql`${table.isDefault} = 1`)]);
 
 export const jobs = sqliteTable("jobs", {
-  id: text("id").primaryKey(), displayId: text("display_id").notNull().unique(), customerId: text("customer_id").notNull().references(() => customers.id), name: text("name").notNull(), address: text("address"), scope: text("scope"), notes: text("notes"), status: text("status").notNull().default("draft"), ...timestamps
+  id: text("id").primaryKey(), displayId: text("display_id").notNull().unique(), customerId: text("customer_id").notNull().references(() => customers.id), name: text("name").notNull(), address: text("address"), addressLine1: text("address_line_1"), addressLine2: text("address_line_2"), city: text("city"), state: text("state"), postalCode: text("postal_code"), scope: text("scope"), notes: text("notes"), status: text("status").notNull().default("draft"), ...timestamps
 }, (table) => [index("jobs_customer_idx").on(table.customerId), index("jobs_status_idx").on(table.status)]);
 
 export const catalogItems = sqliteTable("catalog_items", {

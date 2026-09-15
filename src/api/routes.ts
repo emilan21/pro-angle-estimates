@@ -4,7 +4,8 @@ import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 import { calculateEstimate, calculateEstimateCharges, lineAmountCents } from "../domain/calculations";
-import { artifactRetryInput, catalogInput, catalogWithOfferInput, clearWorkspaceInput, customerAddressInput, customerInput, draftChargeInput, draftMetadataInput, draftOrderInput, estimateGenerationInput, jobInput, lineItemInput, materialInput, retailerOfferInput, type AdjustmentInput, type EstimateSnapshot } from "../domain/contracts";
+import { formatAddress, defaultContractorSettings } from "../domain/addresses";
+import { artifactRetryInput, catalogInput, catalogWithOfferInput, clearWorkspaceInput, contractorSettingsInput, customerAddressInput, customerInput, draftChargeInput, draftMetadataInput, draftOrderInput, estimateGenerationInput, jobInput, lineItemInput, materialInput, retailerOfferInput, type AdjustmentInput, type ContractorSettingsInput, type EstimateSnapshot } from "../domain/contracts";
 import { safeArtifactFilename } from "../domain/ids";
 import { artifacts, catalogItems, customerAddresses, customers, estimates, jobLineItems, jobMaterials, jobs, priceHistory, retailerOffers } from "../db/schema";
 import { customerExportZip, fullExportZip, type FriendlyCustomer } from "../documents/backup";
@@ -22,6 +23,16 @@ const customerAddressParam = z.object({ customerId: z.uuid(), id: z.uuid() });
 
 api.get("/health", (c) => c.json({ ok: true, version: "v1" }));
 
+api.get("/settings/contractor", async (c) => c.json({ data: await readContractorSettings(c.env.DB) }));
+api.put("/settings/contractor", zValidator("json", contractorSettingsInput), async (c) => {
+  const input = c.req.valid("json"), timestamp = now(), actor = c.get("actorEmail");
+  await c.env.DB.batch([
+    c.env.DB.prepare("INSERT INTO settings(key, value_json, updated_at, updated_by) VALUES ('contractor_info', ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at, updated_by=excluded.updated_by").bind(JSON.stringify(input), timestamp, actor),
+    auditStatement(c.env.DB, actor, "update", "setting", "contractor_info")
+  ]);
+  return c.json({ data: input });
+});
+
 api.get("/dashboard", async (c) => {
   const statements = ["SELECT COUNT(*) AS count FROM customers", "SELECT COUNT(*) AS count FROM jobs WHERE status = 'draft'", "SELECT COUNT(*) AS count FROM estimates", "SELECT COALESCE(SUM(total_cents), 0) AS count FROM estimates WHERE generated_at >= datetime('now', '-30 days')"].map((sql) => c.env.DB.prepare(sql));
   const [customerCount, openJobs, estimateCount, monthTotal] = await c.env.DB.batch<{ count: number }>(statements);
@@ -34,10 +45,10 @@ api.get("/customers", async (c) => {
   return c.json({ data: customerRows.map((customer) => ({ ...customer, addresses: addressRows.filter((address) => address.customerId === customer.id) })) });
 });
 api.post("/customers", zValidator("json", customerInput), async (c) => {
-  const input = c.req.valid("json"), id = crypto.randomUUID(), timestamp = now(), actor = c.get("actorEmail");
-  const insert = c.env.DB.prepare("INSERT INTO customers(id, display_id, name, email, phone, address, notes, created_at, updated_at) SELECT ?, printf('C-%04d', next_value), ?, ?, ?, ?, ?, ?, ? FROM counters WHERE scope = 'customer'").bind(id, input.name, input.email || null, input.phone || null, input.address || null, input.notes || null, timestamp, timestamp);
+  const input = c.req.valid("json"), id = crypto.randomUUID(), timestamp = now(), actor = c.get("actorEmail"), address = formatAddress(input);
+  const insert = c.env.DB.prepare("INSERT INTO customers(id, display_id, name, email, phone, address, notes, created_at, updated_at) SELECT ?, printf('C-%04d', next_value), ?, ?, ?, ?, ?, ?, ? FROM counters WHERE scope = 'customer'").bind(id, input.name, input.email || null, input.phone || null, address, input.notes || null, timestamp, timestamp);
   const statements = [insert, c.env.DB.prepare("UPDATE counters SET next_value = next_value + 1, updated_at = ? WHERE scope = 'customer'").bind(timestamp)];
-  if (input.address) statements.push(c.env.DB.prepare("INSERT INTO customer_addresses(id, customer_id, label, address, is_default, created_at, updated_at) VALUES (?, ?, 'Default', ?, 1, ?, ?)").bind(crypto.randomUUID(), id, input.address, timestamp, timestamp));
+  if (address) statements.push(c.env.DB.prepare("INSERT INTO customer_addresses(id, customer_id, label, address, address_line_1, address_line_2, city, state, postal_code, is_default, created_at, updated_at) VALUES (?, ?, 'Default', ?, ?, ?, ?, ?, ?, 1, ?, ?)").bind(crypto.randomUUID(), id, address, input.addressLine1 || null, input.addressLine2 || null, input.city || null, input.state || null, input.postalCode || null, timestamp, timestamp));
   statements.push(auditStatement(c.env.DB, actor, "create", "customer", id));
   await c.env.DB.batch(statements);
   return c.json({ data: await drizzle(c.env.DB).select().from(customers).where(eq(customers.id, id)).get() }, 201);
@@ -46,34 +57,34 @@ api.patch("/customers/:id", zValidator("param", idParam), zValidator("json", cus
   const id = c.req.valid("param").id, input = c.req.valid("json"), actor = c.get("actorEmail"), timestamp = now();
   const existing = await drizzle(c.env.DB).select().from(customers).where(eq(customers.id, id)).get();
   if (!existing) return apiError(c, 404, "NOT_FOUND", "Customer not found.");
-  const updated = await drizzle(c.env.DB).update(customers).set({ name: input.name, email: input.email || null, phone: input.phone || null, address: input.address === undefined ? existing.address : input.address || null, notes: input.notes || null, updatedAt: timestamp }).where(eq(customers.id, id)).returning().get();
+  const updated = await drizzle(c.env.DB).update(customers).set({ name: input.name, email: input.email || null, phone: input.phone || null, address: existing.address, notes: input.notes || null, updatedAt: timestamp }).where(eq(customers.id, id)).returning().get();
   if (!updated) return apiError(c, 404, "NOT_FOUND", "Customer not found.");
   await auditStatement(c.env.DB, actor, "update", "customer", id).run();
   return c.json({ data: updated });
 });
 api.get("/customers/:id/addresses", zValidator("param", idParam), async (c) => c.json({ data: await drizzle(c.env.DB).select().from(customerAddresses).where(eq(customerAddresses.customerId, c.req.valid("param").id)).orderBy(desc(customerAddresses.isDefault), customerAddresses.createdAt).all() }));
 api.post("/customers/:id/addresses", zValidator("param", idParam), zValidator("json", customerAddressInput), async (c) => {
-  const customerId = c.req.valid("param").id, input = c.req.valid("json"), id = crypto.randomUUID(), timestamp = now(), actor = c.get("actorEmail");
+  const customerId = c.req.valid("param").id, input = c.req.valid("json"), id = crypto.randomUUID(), timestamp = now(), actor = c.get("actorEmail"), address = formatAddress(input)!;
   const customer = await drizzle(c.env.DB).select().from(customers).where(eq(customers.id, customerId)).get();
   if (!customer) return apiError(c, 404, "NOT_FOUND", "Customer not found.");
   const existing = await c.env.DB.prepare("SELECT COUNT(*) AS count FROM customer_addresses WHERE customer_id = ?").bind(customerId).first<{ count: number }>();
   const isDefault = input.isDefault || !existing?.count;
   const statements = [];
   if (isDefault) statements.push(c.env.DB.prepare("UPDATE customer_addresses SET is_default = 0, updated_at = ? WHERE customer_id = ?").bind(timestamp, customerId));
-  statements.push(c.env.DB.prepare("INSERT INTO customer_addresses(id, customer_id, label, address, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(id, customerId, input.label, input.address, isDefault ? 1 : 0, timestamp, timestamp));
-  if (isDefault) statements.push(c.env.DB.prepare("UPDATE customers SET address = ?, updated_at = ? WHERE id = ?").bind(input.address, timestamp, customerId));
+  statements.push(c.env.DB.prepare("INSERT INTO customer_addresses(id, customer_id, label, address, address_line_1, address_line_2, city, state, postal_code, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, customerId, input.label, address, input.addressLine1, input.addressLine2 || null, input.city, input.state, input.postalCode, isDefault ? 1 : 0, timestamp, timestamp));
+  if (isDefault) statements.push(c.env.DB.prepare("UPDATE customers SET address = ?, updated_at = ? WHERE id = ?").bind(address, timestamp, customerId));
   statements.push(auditStatement(c.env.DB, actor, "create", "customer_address", id, { customerId, isDefault }));
   await c.env.DB.batch(statements); return c.json({ data: await drizzle(c.env.DB).select().from(customerAddresses).where(eq(customerAddresses.id, id)).get() }, 201);
 });
 api.patch("/customers/:customerId/addresses/:id", zValidator("param", customerAddressParam), zValidator("json", customerAddressInput), async (c) => {
-  const { customerId, id } = c.req.valid("param"), input = c.req.valid("json"), timestamp = now(), actor = c.get("actorEmail");
+  const { customerId, id } = c.req.valid("param"), input = c.req.valid("json"), timestamp = now(), actor = c.get("actorEmail"), address = formatAddress(input)!;
   const current = await drizzle(c.env.DB).select().from(customerAddresses).where(and(eq(customerAddresses.id, id), eq(customerAddresses.customerId, customerId))).get();
   if (!current) return apiError(c, 404, "NOT_FOUND", "Customer address not found.");
   if (current.isDefault && !input.isDefault) return apiError(c, 422, "DEFAULT_REQUIRED", "Choose another default address before changing this one.");
   const statements = [];
   if (input.isDefault) statements.push(c.env.DB.prepare("UPDATE customer_addresses SET is_default = 0, updated_at = ? WHERE customer_id = ? AND id <> ?").bind(timestamp, customerId, id));
-  statements.push(c.env.DB.prepare("UPDATE customer_addresses SET label = ?, address = ?, is_default = ?, updated_at = ? WHERE id = ? AND customer_id = ?").bind(input.label, input.address, input.isDefault ? 1 : 0, timestamp, id, customerId));
-  if (input.isDefault) statements.push(c.env.DB.prepare("UPDATE customers SET address = ?, updated_at = ? WHERE id = ?").bind(input.address, timestamp, customerId));
+  statements.push(c.env.DB.prepare("UPDATE customer_addresses SET label = ?, address = ?, address_line_1 = ?, address_line_2 = ?, city = ?, state = ?, postal_code = ?, is_default = ?, updated_at = ? WHERE id = ? AND customer_id = ?").bind(input.label, address, input.addressLine1, input.addressLine2 || null, input.city, input.state, input.postalCode, input.isDefault ? 1 : 0, timestamp, id, customerId));
+  if (input.isDefault) statements.push(c.env.DB.prepare("UPDATE customers SET address = ?, updated_at = ? WHERE id = ?").bind(address, timestamp, customerId));
   statements.push(auditStatement(c.env.DB, actor, "update", "customer_address", id, { customerId, isDefault: input.isDefault }));
   await c.env.DB.batch(statements); return c.json({ data: await drizzle(c.env.DB).select().from(customerAddresses).where(eq(customerAddresses.id, id)).get() });
 });
@@ -117,19 +128,19 @@ api.get("/jobs", async (c) => {
   return c.json({ data: rows.results });
 });
 api.post("/jobs", zValidator("json", jobInput), async (c) => {
-  const input = c.req.valid("json"), id = crypto.randomUUID(), timestamp = now(), year = new Date().getFullYear(), scope = `job:${year}`, actor = c.get("actorEmail");
+  const input = c.req.valid("json"), id = crypto.randomUUID(), timestamp = now(), year = new Date().getFullYear(), scope = `job:${year}`, actor = c.get("actorEmail"), address = formatAddress(input);
   const counter = c.env.DB.prepare("INSERT INTO counters(scope, next_value, updated_at) VALUES (?, 1, ?) ON CONFLICT(scope) DO NOTHING").bind(scope, timestamp);
-  const insert = c.env.DB.prepare("INSERT INTO jobs(id, display_id, customer_id, name, address, scope, notes, status, created_at, updated_at) SELECT ?, printf('J-%d-%04d', ?, next_value), ?, ?, ?, ?, ?, 'draft', ?, ? FROM counters WHERE scope = ?").bind(id, year, input.customerId, input.name, input.address || null, input.scope || null, input.notes || null, timestamp, timestamp, scope);
+  const insert = c.env.DB.prepare("INSERT INTO jobs(id, display_id, customer_id, name, address, address_line_1, address_line_2, city, state, postal_code, scope, notes, status, created_at, updated_at) SELECT ?, printf('J-%d-%04d', ?, next_value), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ? FROM counters WHERE scope = ?").bind(id, year, input.customerId, input.name, address, input.addressLine1 || null, input.addressLine2 || null, input.city || null, input.state || null, input.postalCode || null, input.scope || null, input.notes || null, timestamp, timestamp, scope);
   try { await c.env.DB.batch([counter, insert, c.env.DB.prepare("UPDATE counters SET next_value = next_value + 1, updated_at = ? WHERE scope = ?").bind(timestamp, scope), auditStatement(c.env.DB, actor, "create", "job", id)]); }
   catch { return apiError(c, 422, "INVALID_CUSTOMER", "The selected customer does not exist."); }
   return c.json({ data: await drizzle(c.env.DB).select().from(jobs).where(eq(jobs.id, id)).get() }, 201);
 });
 api.patch("/jobs/:id", zValidator("param", idParam), zValidator("json", jobInput), async (c) => {
-  const id = c.req.valid("param").id, input = c.req.valid("json"), timestamp = now(), actor = c.get("actorEmail");
+  const id = c.req.valid("param").id, input = c.req.valid("json"), timestamp = now(), actor = c.get("actorEmail"), address = formatAddress(input);
   const existing = await drizzle(c.env.DB).select().from(jobs).where(eq(jobs.id, id)).get();
   if (!existing) return apiError(c, 404, "NOT_FOUND", "Job not found.");
   if (existing.customerId !== input.customerId) return apiError(c, 422, "CUSTOMER_MISMATCH", "A job cannot be moved to another customer.");
-  const updated = await drizzle(c.env.DB).update(jobs).set({ name: input.name, address: input.address || null, scope: input.scope || null, notes: input.notes || null, updatedAt: timestamp }).where(eq(jobs.id, id)).returning().get();
+  const updated = await drizzle(c.env.DB).update(jobs).set({ name: input.name, address, addressLine1: input.addressLine1 || null, addressLine2: input.addressLine2 || null, city: input.city || null, state: input.state || null, postalCode: input.postalCode || null, scope: input.scope || null, notes: input.notes || null, updatedAt: timestamp }).where(eq(jobs.id, id)).returning().get();
   await auditStatement(c.env.DB, actor, "update", "job", id).run();
   return c.json({ data: updated });
 });
@@ -505,11 +516,22 @@ async function readEstimateSnapshot(db: D1Database, estimateId: string): Promise
   return { estimateId, displayId: estimate.displayId, version: estimate.version, generatedAt: estimate.generatedAt, customer: JSON.parse(estimate.customerSnapshotJson) as EstimateSnapshot["customer"], job: JSON.parse(estimate.jobSnapshotJson) as EstimateSnapshot["job"], lines, adjustments: adjustmentRows, totals: calculateEstimateCharges(lines, adjustmentRows), notes: estimate.notes };
 }
 
+async function readContractorSettings(db: D1Database): Promise<ContractorSettingsInput> {
+  const row = await db.prepare("SELECT value_json AS valueJson FROM settings WHERE key = 'contractor_info'").first<{ valueJson: string }>();
+  if (!row) return defaultContractorSettings;
+  try {
+    const parsed = contractorSettingsInput.safeParse(JSON.parse(row.valueJson));
+    return parsed.success ? parsed.data : defaultContractorSettings;
+  } catch {
+    return defaultContractorSettings;
+  }
+}
+
 async function generateArtifacts(env: Env, snapshot: EstimateSnapshot, formats: Array<"csv" | "xlsx" | "pdf"> = ["csv", "xlsx", "pdf"]) {
   const outputs: Array<{ format: "csv" | "xlsx" | "pdf"; data?: Uint8Array; contentType: string; error?: string }> = [];
   if (formats.includes("csv")) outputs.push({ format: "csv", data: new TextEncoder().encode(estimateCsv(snapshot)), contentType: "text/csv; charset=utf-8" });
   if (formats.includes("xlsx")) outputs.push({ format: "xlsx", data: estimateXlsx(snapshot), contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  if (formats.includes("pdf")) try { const response = await env.BROWSER.quickAction("pdf", { html: estimateHtml(snapshot), pdfOptions: { format: "letter", printBackground: true, preferCSSPageSize: true, margin: { top: "0", right: "0", bottom: "0", left: "0" } } }); if (!response.ok) throw new Error(`Browser Run returned ${response.status}`); outputs.push({ format: "pdf", data: new Uint8Array(await response.arrayBuffer()), contentType: "application/pdf" }); }
+  if (formats.includes("pdf")) try { const response = await env.BROWSER.quickAction("pdf", { html: estimateHtml(snapshot, await readContractorSettings(env.DB)), pdfOptions: { format: "letter", printBackground: true, preferCSSPageSize: true, margin: { top: "0", right: "0", bottom: "0", left: "0" } } }); if (!response.ok) throw new Error(`Browser Run returned ${response.status}`); outputs.push({ format: "pdf", data: new Uint8Array(await response.arrayBuffer()), contentType: "application/pdf" }); }
   catch (error) { outputs.push({ format: "pdf", contentType: "application/pdf", error: error instanceof Error ? error.message : "PDF generation failed" }); }
   const result = [];
   for (const output of outputs) {
