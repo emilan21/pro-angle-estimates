@@ -19,6 +19,7 @@ variable "allowed_emails" {
     "eprogram1@gmail.com",
     "emilan@ericmilan.dev",
     "edingerkevin75@gmail.com",
+    "milantina74@gmail.com",
   ]
 }
 variable "google_identity_provider_id" {

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const timestamps = {
@@ -8,6 +9,10 @@ const timestamps = {
 export const customers = sqliteTable("customers", {
   id: text("id").primaryKey(), displayId: text("display_id").notNull().unique(), name: text("name").notNull(), email: text("email"), phone: text("phone"), address: text("address"), notes: text("notes"), ...timestamps
 }, (table) => [index("customers_name_idx").on(table.name)]);
+
+export const customerAddresses = sqliteTable("customer_addresses", {
+  id: text("id").primaryKey(), customerId: text("customer_id").notNull().references(() => customers.id), label: text("label").notNull(), address: text("address").notNull(), isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false), ...timestamps
+}, (table) => [index("customer_address_customer_idx").on(table.customerId), uniqueIndex("customer_address_default_uq").on(table.customerId).where(sql`${table.isDefault} = 1`)]);
 
 export const jobs = sqliteTable("jobs", {
   id: text("id").primaryKey(), displayId: text("display_id").notNull().unique(), customerId: text("customer_id").notNull().references(() => customers.id), name: text("name").notNull(), address: text("address"), scope: text("scope"), notes: text("notes"), status: text("status").notNull().default("draft"), ...timestamps
