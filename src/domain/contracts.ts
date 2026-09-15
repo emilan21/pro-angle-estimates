@@ -14,6 +14,12 @@ export const customerInput = z.object({
   notes: optionalText
 }).strict();
 
+export const customerAddressInput = z.object({
+  label: nonEmpty.max(80),
+  address: z.string().trim().min(1).max(1_000),
+  isDefault: z.boolean()
+}).strict();
+
 export const jobInput = z.object({
   customerId: z.uuid(),
   name: nonEmpty,
@@ -100,6 +106,7 @@ export const clearWorkspaceInput = z.object({
 }).strict();
 
 export type CustomerInput = z.infer<typeof customerInput>;
+export type CustomerAddressInput = z.infer<typeof customerAddressInput>;
 export type JobInput = z.infer<typeof jobInput>;
 export type CatalogInput = z.infer<typeof catalogInput>;
 export type LineItemInput = z.infer<typeof lineItemInput>;

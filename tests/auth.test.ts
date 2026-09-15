@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { canAccessRequest, identityFromPayload } from "../src/api/auth";
 
-const allowedEmails = "proangleconstruction@gmail.com,eprogram1@gmail.com,emilan@ericmilan.dev,edingerkevin75@gmail.com";
+const allowedEmails = "proangleconstruction@gmail.com,eprogram1@gmail.com,emilan@ericmilan.dev,edingerkevin75@gmail.com,milantina74@gmail.com";
 
 describe("Access identity", () => {
   it("accepts allowlisted users case-insensitively", () => {
     expect(identityFromPayload({ type: "app", email: "ProAngleConstruction@gmail.com", sub: "owner" }, allowedEmails).email).toBe("proangleconstruction@gmail.com");
     expect(identityFromPayload({ type: "app", email: "EMILAN@ERICMILAN.DEV", sub: "user" }, allowedEmails).email).toBe("emilan@ericmilan.dev");
+    expect(identityFromPayload({ type: "app", email: "milantina74@gmail.com", sub: "user" }, allowedEmails).email).toBe("milantina74@gmail.com");
   });
   it("accepts the designated smoke service token", () => expect(identityFromPayload({ type: "app", common_name: "smoke.access" }, allowedEmails, "smoke").email).toBe("service:smoke"));
   it("limits the smoke service identity to the GET health check", () => {

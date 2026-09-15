@@ -4,9 +4,9 @@ import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 import { calculateEstimate, calculateEstimateCharges, lineAmountCents } from "../domain/calculations";
-import { artifactRetryInput, catalogInput, catalogWithOfferInput, clearWorkspaceInput, customerInput, draftChargeInput, draftMetadataInput, draftOrderInput, estimateGenerationInput, jobInput, lineItemInput, materialInput, retailerOfferInput, type AdjustmentInput, type EstimateSnapshot } from "../domain/contracts";
+import { artifactRetryInput, catalogInput, catalogWithOfferInput, clearWorkspaceInput, customerAddressInput, customerInput, draftChargeInput, draftMetadataInput, draftOrderInput, estimateGenerationInput, jobInput, lineItemInput, materialInput, retailerOfferInput, type AdjustmentInput, type EstimateSnapshot } from "../domain/contracts";
 import { safeArtifactFilename } from "../domain/ids";
-import { artifacts, catalogItems, customers, estimates, jobLineItems, jobMaterials, jobs, priceHistory, retailerOffers } from "../db/schema";
+import { artifacts, catalogItems, customerAddresses, customers, estimates, jobLineItems, jobMaterials, jobs, priceHistory, retailerOffers } from "../db/schema";
 import { customerExportZip, fullExportZip, type FriendlyCustomer } from "../documents/backup";
 import { estimateCsv, materialsCsv } from "../documents/csv";
 import { estimateHtml } from "../documents/pdf";
@@ -18,6 +18,7 @@ export const api = new Hono<AppBindings>();
 const idParam = z.object({ id: z.uuid() });
 const jobLineParam = z.object({ jobId: z.uuid(), id: z.uuid() });
 const draftChargeParam = z.object({ id: z.uuid(), chargeId: z.uuid() });
+const customerAddressParam = z.object({ customerId: z.uuid(), id: z.uuid() });
 
 api.get("/health", (c) => c.json({ ok: true, version: "v1" }));
 
@@ -28,19 +29,64 @@ api.get("/dashboard", async (c) => {
   return c.json({ counts: { customers: customerCount.results[0]?.count ?? 0, openJobs: openJobs.results[0]?.count ?? 0, estimates: estimateCount.results[0]?.count ?? 0, monthTotalCents: monthTotal.results[0]?.count ?? 0 }, recent: recent.results });
 });
 
-api.get("/customers", async (c) => c.json({ data: await drizzle(c.env.DB).select().from(customers).orderBy(desc(customers.createdAt)).all() }));
+api.get("/customers", async (c) => {
+  const [customerRows, addressRows] = await Promise.all([drizzle(c.env.DB).select().from(customers).orderBy(desc(customers.createdAt)).all(), drizzle(c.env.DB).select().from(customerAddresses).orderBy(desc(customerAddresses.isDefault), customerAddresses.createdAt).all()]);
+  return c.json({ data: customerRows.map((customer) => ({ ...customer, addresses: addressRows.filter((address) => address.customerId === customer.id) })) });
+});
 api.post("/customers", zValidator("json", customerInput), async (c) => {
   const input = c.req.valid("json"), id = crypto.randomUUID(), timestamp = now(), actor = c.get("actorEmail");
   const insert = c.env.DB.prepare("INSERT INTO customers(id, display_id, name, email, phone, address, notes, created_at, updated_at) SELECT ?, printf('C-%04d', next_value), ?, ?, ?, ?, ?, ?, ? FROM counters WHERE scope = 'customer'").bind(id, input.name, input.email || null, input.phone || null, input.address || null, input.notes || null, timestamp, timestamp);
-  await c.env.DB.batch([insert, c.env.DB.prepare("UPDATE counters SET next_value = next_value + 1, updated_at = ? WHERE scope = 'customer'").bind(timestamp), auditStatement(c.env.DB, actor, "create", "customer", id)]);
+  const statements = [insert, c.env.DB.prepare("UPDATE counters SET next_value = next_value + 1, updated_at = ? WHERE scope = 'customer'").bind(timestamp)];
+  if (input.address) statements.push(c.env.DB.prepare("INSERT INTO customer_addresses(id, customer_id, label, address, is_default, created_at, updated_at) VALUES (?, ?, 'Default', ?, 1, ?, ?)").bind(crypto.randomUUID(), id, input.address, timestamp, timestamp));
+  statements.push(auditStatement(c.env.DB, actor, "create", "customer", id));
+  await c.env.DB.batch(statements);
   return c.json({ data: await drizzle(c.env.DB).select().from(customers).where(eq(customers.id, id)).get() }, 201);
 });
 api.patch("/customers/:id", zValidator("param", idParam), zValidator("json", customerInput), async (c) => {
   const id = c.req.valid("param").id, input = c.req.valid("json"), actor = c.get("actorEmail"), timestamp = now();
-  const updated = await drizzle(c.env.DB).update(customers).set({ name: input.name, email: input.email || null, phone: input.phone || null, address: input.address || null, notes: input.notes || null, updatedAt: timestamp }).where(eq(customers.id, id)).returning().get();
+  const existing = await drizzle(c.env.DB).select().from(customers).where(eq(customers.id, id)).get();
+  if (!existing) return apiError(c, 404, "NOT_FOUND", "Customer not found.");
+  const updated = await drizzle(c.env.DB).update(customers).set({ name: input.name, email: input.email || null, phone: input.phone || null, address: input.address === undefined ? existing.address : input.address || null, notes: input.notes || null, updatedAt: timestamp }).where(eq(customers.id, id)).returning().get();
   if (!updated) return apiError(c, 404, "NOT_FOUND", "Customer not found.");
   await auditStatement(c.env.DB, actor, "update", "customer", id).run();
   return c.json({ data: updated });
+});
+api.get("/customers/:id/addresses", zValidator("param", idParam), async (c) => c.json({ data: await drizzle(c.env.DB).select().from(customerAddresses).where(eq(customerAddresses.customerId, c.req.valid("param").id)).orderBy(desc(customerAddresses.isDefault), customerAddresses.createdAt).all() }));
+api.post("/customers/:id/addresses", zValidator("param", idParam), zValidator("json", customerAddressInput), async (c) => {
+  const customerId = c.req.valid("param").id, input = c.req.valid("json"), id = crypto.randomUUID(), timestamp = now(), actor = c.get("actorEmail");
+  const customer = await drizzle(c.env.DB).select().from(customers).where(eq(customers.id, customerId)).get();
+  if (!customer) return apiError(c, 404, "NOT_FOUND", "Customer not found.");
+  const existing = await c.env.DB.prepare("SELECT COUNT(*) AS count FROM customer_addresses WHERE customer_id = ?").bind(customerId).first<{ count: number }>();
+  const isDefault = input.isDefault || !existing?.count;
+  const statements = [];
+  if (isDefault) statements.push(c.env.DB.prepare("UPDATE customer_addresses SET is_default = 0, updated_at = ? WHERE customer_id = ?").bind(timestamp, customerId));
+  statements.push(c.env.DB.prepare("INSERT INTO customer_addresses(id, customer_id, label, address, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(id, customerId, input.label, input.address, isDefault ? 1 : 0, timestamp, timestamp));
+  if (isDefault) statements.push(c.env.DB.prepare("UPDATE customers SET address = ?, updated_at = ? WHERE id = ?").bind(input.address, timestamp, customerId));
+  statements.push(auditStatement(c.env.DB, actor, "create", "customer_address", id, { customerId, isDefault }));
+  await c.env.DB.batch(statements); return c.json({ data: await drizzle(c.env.DB).select().from(customerAddresses).where(eq(customerAddresses.id, id)).get() }, 201);
+});
+api.patch("/customers/:customerId/addresses/:id", zValidator("param", customerAddressParam), zValidator("json", customerAddressInput), async (c) => {
+  const { customerId, id } = c.req.valid("param"), input = c.req.valid("json"), timestamp = now(), actor = c.get("actorEmail");
+  const current = await drizzle(c.env.DB).select().from(customerAddresses).where(and(eq(customerAddresses.id, id), eq(customerAddresses.customerId, customerId))).get();
+  if (!current) return apiError(c, 404, "NOT_FOUND", "Customer address not found.");
+  if (current.isDefault && !input.isDefault) return apiError(c, 422, "DEFAULT_REQUIRED", "Choose another default address before changing this one.");
+  const statements = [];
+  if (input.isDefault) statements.push(c.env.DB.prepare("UPDATE customer_addresses SET is_default = 0, updated_at = ? WHERE customer_id = ? AND id <> ?").bind(timestamp, customerId, id));
+  statements.push(c.env.DB.prepare("UPDATE customer_addresses SET label = ?, address = ?, is_default = ?, updated_at = ? WHERE id = ? AND customer_id = ?").bind(input.label, input.address, input.isDefault ? 1 : 0, timestamp, id, customerId));
+  if (input.isDefault) statements.push(c.env.DB.prepare("UPDATE customers SET address = ?, updated_at = ? WHERE id = ?").bind(input.address, timestamp, customerId));
+  statements.push(auditStatement(c.env.DB, actor, "update", "customer_address", id, { customerId, isDefault: input.isDefault }));
+  await c.env.DB.batch(statements); return c.json({ data: await drizzle(c.env.DB).select().from(customerAddresses).where(eq(customerAddresses.id, id)).get() });
+});
+api.delete("/customers/:customerId/addresses/:id", zValidator("param", customerAddressParam), async (c) => {
+  const { customerId, id } = c.req.valid("param"), timestamp = now(), actor = c.get("actorEmail");
+  const current = await drizzle(c.env.DB).select().from(customerAddresses).where(and(eq(customerAddresses.id, id), eq(customerAddresses.customerId, customerId))).get();
+  if (!current) return apiError(c, 404, "NOT_FOUND", "Customer address not found.");
+  const replacement = current.isDefault ? await c.env.DB.prepare("SELECT id, address FROM customer_addresses WHERE customer_id = ? AND id <> ? ORDER BY created_at LIMIT 1").bind(customerId, id).first<{ id: string; address: string }>() : null;
+  const statements = [c.env.DB.prepare("DELETE FROM customer_addresses WHERE id = ? AND customer_id = ?").bind(id, customerId)];
+  if (replacement) statements.push(c.env.DB.prepare("UPDATE customer_addresses SET is_default = 1, updated_at = ? WHERE id = ?").bind(timestamp, replacement.id));
+  if (current.isDefault) statements.push(c.env.DB.prepare("UPDATE customers SET address = ?, updated_at = ? WHERE id = ?").bind(replacement?.address ?? null, timestamp, customerId));
+  statements.push(auditStatement(c.env.DB, actor, "delete", "customer_address", id, { customerId }));
+  await c.env.DB.batch(statements); return c.body(null, 204);
 });
 api.delete("/customers/:id", zValidator("param", idParam), async (c) => {
   const id = c.req.valid("param").id, actor = c.get("actorEmail");
@@ -59,6 +105,7 @@ api.delete("/customers/:id", zValidator("param", idParam), async (c) => {
     c.env.DB.prepare("DELETE FROM job_materials WHERE job_id IN (SELECT id FROM jobs WHERE customer_id = ?)").bind(id),
     c.env.DB.prepare("DELETE FROM job_line_items WHERE job_id IN (SELECT id FROM jobs WHERE customer_id = ?)").bind(id),
     c.env.DB.prepare("DELETE FROM jobs WHERE customer_id = ?").bind(id),
+    c.env.DB.prepare("DELETE FROM customer_addresses WHERE customer_id = ?").bind(id),
     c.env.DB.prepare("DELETE FROM customers WHERE id = ?").bind(id),
     auditStatement(c.env.DB, actor, "delete", "customer", id, { displayId: customer.displayId, cascade: true })
   ]);
@@ -370,7 +417,7 @@ api.get("/artifacts/:id/download", zValidator("param", idParam), async (c) => {
 });
 
 api.get("/export", async (c) => {
-  const tableNames = ["customers", "jobs", "job_line_items", "job_materials", "catalog_items", "retailer_offers", "price_history", "estimate_drafts", "estimate_draft_charges", "estimate_draft_adjustments", "estimates", "estimate_line_items", "estimate_adjustments"];
+  const tableNames = ["customers", "customer_addresses", "jobs", "job_line_items", "job_materials", "catalog_items", "retailer_offers", "price_history", "estimate_drafts", "estimate_draft_charges", "estimate_draft_adjustments", "estimates", "estimate_line_items", "estimate_adjustments"];
   const tables = await Promise.all(tableNames.map(async (name) => ({ name: name === "job_line_items" ? "line_items" : name === "catalog_items" ? "catalog" : name, rows: (await c.env.DB.prepare(`SELECT * FROM ${name}`).all()).results as Record<string, unknown>[] })));
   const data = fullExportZip(tables); return new Response(data as BodyInit, { headers: { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="pro-angle-full-export-${new Date().toISOString().slice(0, 10)}.zip"`, "Cache-Control": "private, no-store" } });
 });
@@ -407,6 +454,7 @@ api.delete("/workspace-data", zValidator("json", clearWorkspaceInput), async (c)
     c.env.DB.prepare("DELETE FROM job_materials"),
     c.env.DB.prepare("DELETE FROM jobs"),
     c.env.DB.prepare("DELETE FROM catalog_items"),
+    c.env.DB.prepare("DELETE FROM customer_addresses"),
     c.env.DB.prepare("DELETE FROM customers"),
     c.env.DB.prepare("DELETE FROM settings"),
     c.env.DB.prepare("DELETE FROM counters"),

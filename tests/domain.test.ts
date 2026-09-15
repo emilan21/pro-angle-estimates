@@ -4,7 +4,7 @@ import { customerDisplayId, estimateDisplayId, jobDisplayId, safeArtifactFilenam
 import { likelySameProduct, normalizeRetailerIdentity } from "../src/domain/retailers";
 import { catalogFormPayload, catalogWithOfferFormPayload, jobLineFormPayload, retailerOfferFormPayload } from "../src/ui/forms";
 import { accessIdentityFromUnknown } from "../src/ui/api";
-import { clearWorkspaceInput, retailerOfferInput } from "../src/domain/contracts";
+import { clearWorkspaceInput, customerAddressInput, retailerOfferInput } from "../src/domain/contracts";
 
 describe("estimate domain", () => {
   it("allocates stable display identifiers", () => { expect(customerDisplayId(1)).toBe("C-0001"); expect(jobDisplayId(2026,1)).toBe("J-2026-0001"); expect(estimateDisplayId("J-2026-0001",1)).toBe("EST-J-2026-0001-v01"); });
@@ -31,5 +31,10 @@ describe("estimate domain", () => {
     expect(clearWorkspaceInput.safeParse({ confirmation: "CLEAR ALL DATA" }).success).toBe(true);
     expect(clearWorkspaceInput.safeParse({ confirmation: "clear all data" }).success).toBe(false);
     expect(clearWorkspaceInput.safeParse({ confirmation: "CLEAR ALL DATA", force: true }).success).toBe(false);
+  });
+  it("validates labeled customer addresses and rejects unexpected fields", () => {
+    expect(customerAddressInput.safeParse({ label: "Home", address: "1 Main Street", isDefault: true }).success).toBe(true);
+    expect(customerAddressInput.safeParse({ label: "", address: "1 Main Street", isDefault: false }).success).toBe(false);
+    expect(customerAddressInput.safeParse({ label: "Home", address: "1 Main Street", isDefault: false, customerId: "unexpected" }).success).toBe(false);
   });
 });
