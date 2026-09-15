@@ -5,27 +5,52 @@ export const optionalText = z.string().trim().max(4_000).nullish();
 export const cents = z.number().int().min(0).max(100_000_000);
 export const quantity = z.number().positive().max(1_000_000);
 export const httpsUrl = z.url().refine((value) => new URL(value).protocol === "https:", "Product URL must use HTTPS");
+const addressPart = (max: number) => z.string().trim().max(max).nullish();
+
+export const structuredAddressInput = z.object({
+  addressLine1: addressPart(250),
+  addressLine2: addressPart(250),
+  city: addressPart(120),
+  state: addressPart(60),
+  postalCode: addressPart(20)
+});
 
 export const customerInput = z.object({
   name: nonEmpty,
   email: z.email().or(z.literal("")).nullish(),
   phone: z.string().trim().max(50).nullish(),
-  address: z.string().trim().max(1_000).nullish(),
+  ...structuredAddressInput.shape,
   notes: optionalText
 }).strict();
 
 export const customerAddressInput = z.object({
   label: nonEmpty.max(80),
-  address: z.string().trim().min(1).max(1_000),
+  addressLine1: z.string().trim().min(1).max(250),
+  addressLine2: addressPart(250),
+  city: z.string().trim().min(1).max(120),
+  state: z.string().trim().min(1).max(60),
+  postalCode: z.string().trim().min(1).max(20),
   isDefault: z.boolean()
 }).strict();
 
 export const jobInput = z.object({
   customerId: z.uuid(),
   name: nonEmpty,
-  address: z.string().trim().max(1_000).nullish(),
+  ...structuredAddressInput.shape,
   scope: z.string().trim().max(10_000).nullish(),
   notes: optionalText
+}).strict();
+
+export const contractorSettingsInput = z.object({
+  companyName: nonEmpty.max(160),
+  contractorName: nonEmpty.max(160),
+  email: z.email(),
+  phone: z.string().trim().min(1).max(50),
+  addressLine1: z.string().trim().min(1).max(250),
+  addressLine2: addressPart(250),
+  city: z.string().trim().min(1).max(120),
+  state: z.string().trim().min(1).max(60),
+  postalCode: z.string().trim().min(1).max(20)
 }).strict();
 
 export const catalogInput = z.object({
@@ -107,6 +132,7 @@ export const clearWorkspaceInput = z.object({
 
 export type CustomerInput = z.infer<typeof customerInput>;
 export type CustomerAddressInput = z.infer<typeof customerAddressInput>;
+export type ContractorSettingsInput = z.infer<typeof contractorSettingsInput>;
 export type JobInput = z.infer<typeof jobInput>;
 export type CatalogInput = z.infer<typeof catalogInput>;
 export type LineItemInput = z.infer<typeof lineItemInput>;
