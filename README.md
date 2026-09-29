@@ -14,13 +14,13 @@ Private estimate management for Pro Angle Construction. This is a standalone Typ
 
 ## Local setup
 
-1. `npm install`
+1. `npm ci`
 2. Copy `.env.example` to `.dev.vars` and replace placeholders. Localhost can use `LOCAL_DEV_BYPASS=true`; production is fixed to `false`.
 3. `npm run types`
 4. `npm run db:migrate:local`
 5. `npm run dev`
 
-Before deploying, replace placeholder D1 IDs, Access team domain, audience, account ID, and database ID in `wrangler.jsonc` from OpenTofu outputs. Add `D1_REST_API_TOKEN` (account-level D1 Edit, scoped to this account) and `SMOKE_ACCESS_CLIENT_ID` with `wrangler secret put`. The GitHub production environment also requires `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `SMOKE_ACCESS_CLIENT_ID`, and `SMOKE_ACCESS_CLIENT_SECRET`.
+The tracked `wrangler.jsonc` already contains the production and staging resource IDs and Access settings. Before a deployment, compare them with the current OpenTofu outputs; update them only as part of a reviewed infrastructure change. Keep secret values out of Git. Add `D1_REST_API_TOKEN` (account-level D1 Edit, scoped to this account) and `SMOKE_ACCESS_CLIENT_ID` with `wrangler secret put`. The GitHub production environment also requires `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `SMOKE_ACCESS_CLIENT_ID`, and `SMOKE_ACCESS_CLIENT_SECRET`.
 
 ## Verification
 
